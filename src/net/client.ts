@@ -25,7 +25,7 @@ export interface ClientHandlers {
 
 export interface HelloPayload {
   name: string;
-  contentHash: string;
+  contentHash?: string;
   protocol: number;
   token?: string;
   characterId?: string;

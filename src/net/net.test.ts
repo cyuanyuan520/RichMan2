@@ -7,6 +7,7 @@ import {
   intentSchema,
   sanitizeState,
   type ClientIntent,
+  type WelcomeMessage,
 } from "./protocol";
 import { buildGameContent } from "@/data/content";
 import { defaultEconomy } from "@/data/content/economy";
@@ -92,6 +93,60 @@ describe("host/client over memory transport", () => {
     expect(seat?.name).toBe("小明");
     expect(seat?.claimed).toBe(true);
     expect(client.players[2]!.isBot).toBe(true);
+  });
+
+  it("advertises map id and accepts a hello without a content hash", async () => {
+    const host = new HostSession(makeSetup([false, false, true, true]), content);
+    const [hostSide, clientSide] = memoryTransports("host", "client");
+    host.connect(hostSide);
+
+    const welcomes: WelcomeMessage[] = [];
+    const client = new ClientSession({ onWelcome: (welcome) => welcomes.push(welcome) });
+    client.connect(clientSide, {
+      protocol: PROTOCOL_VERSION,
+      name: "后进房",
+    });
+    await flush();
+
+    expect(welcomes).toHaveLength(1);
+    expect(welcomes[0]!.mapId).toBe("ink");
+    expect(welcomes[0]!.contentHash).toBe(content.contentHash);
+    expect(client.seat).toBe(asPlayerId("p2"));
+  });
+
+  it("rejects a hello whose content hash mismatches", async () => {
+    const host = new HostSession(makeSetup([false, false, true, true]), content);
+    const [hostSide, clientSide] = memoryTransports("host", "client");
+    host.connect(hostSide);
+    const rejections: string[] = [];
+    const client = new ClientSession({
+      onRejected: (rejected) => rejections.push(rejected.code),
+    });
+    client.connect(clientSide, { ...HELLO, contentHash: "deadbeefdeadbeef" });
+    await flush();
+    expect(rejections).toContain("content");
+    expect(client.seat).toBeNull();
+  });
+
+  it("lets the host send chat and emotes from its own seat", async () => {
+    const host = new HostSession(makeSetup([false, false, true, true]), content);
+    const [hostSide, clientSide] = memoryTransports("host", "client");
+    host.connect(hostSide);
+    const chats: string[] = [];
+    const emotes: string[] = [];
+    const client = new ClientSession({
+      onChat: (chat) => chats.push(chat.text),
+      onEmote: (emote) => emotes.push(emote.emoteId),
+    });
+    client.connect(clientSide, HELLO);
+    await flush();
+
+    expect(host.sendChatFrom(asPlayerId("p1"), "大家好")).toBe(true);
+    expect(host.sendEmoteFrom(asPlayerId("p1"), "clap")).toBe(true);
+    await flush();
+    expect(chats).toContain("大家好");
+    expect(emotes).toContain("clap");
+    expect(host.sendChatFrom(asPlayerId("p3"), "AI 不能发言")).toBe(false);
   });
 
   it("starts the game and streams updates with events", async () => {

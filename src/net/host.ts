@@ -61,6 +61,8 @@ export interface HostOptions {
   pingIntervalMs?: number;
   livenessTimeoutMs?: number;
   hostSeat?: number;
+  onUpdate?: (state: GameState, events: GameEvent[]) => void;
+  onSeatsChange?: () => void;
 }
 
 export interface SubmitResult {
@@ -71,7 +73,9 @@ export interface SubmitResult {
 export class HostSession {
   readonly content: GameContent;
   readonly setup: GameSetup;
-  readonly options: Required<HostOptions>;
+  readonly options: Required<Omit<HostOptions, "onUpdate" | "onSeatsChange">>;
+  private readonly onUpdateCallback: HostOptions["onUpdate"] | null;
+  private readonly onSeatsCallback: HostOptions["onSeatsChange"] | null;
   state: GameState | null = null;
   started = false;
   private seats: HostSeat[] = [];
@@ -83,6 +87,8 @@ export class HostSession {
   constructor(setup: GameSetup, content: GameContent, options: HostOptions = {}) {
     this.setup = setup;
     this.content = content;
+    this.onUpdateCallback = options.onUpdate ?? null;
+    this.onSeatsCallback = options.onSeatsChange ?? null;
     this.options = {
       now: options.now ?? (() => Date.now()),
       disconnectGraceMs: options.disconnectGraceMs ?? 15000,
@@ -241,7 +247,7 @@ export class HostSession {
   private handleHello(
     message: {
       protocol: number;
-      contentHash: string;
+      contentHash?: string;
       token?: string;
       name: string;
       characterId?: string;
@@ -258,7 +264,10 @@ export class HostSession {
       this.strike(transport, "version", "客户端版本不一致，请刷新页面");
       return;
     }
-    if (message.contentHash !== this.content.contentHash) {
+    if (
+      message.contentHash !== undefined &&
+      message.contentHash !== this.content.contentHash
+    ) {
       this.strike(transport, "content", "游戏内容不一致，请刷新页面");
       return;
     }
@@ -312,6 +321,7 @@ export class HostSession {
       type: "welcome",
       protocol: PROTOCOL_VERSION,
       contentHash: this.content.contentHash,
+      mapId: this.content.map.id,
       seat: seat.playerId,
       token: seat.token,
       resumeSeq: seat.lastIntentSeq,
@@ -387,17 +397,29 @@ export class HostSession {
     if (!seat) {
       return;
     }
+    this.sendChatFrom(seat.playerId, text);
+  }
+
+  sendChatFrom(playerId: PlayerId, text: string): boolean {
+    const seat = this.seats.find((entry) => entry.playerId === playerId);
+    if (!seat || seat.isBot) {
+      return false;
+    }
+    const trimmed = text.trim();
+    if (trimmed.length === 0) {
+      return false;
+    }
     const now = this.options.now();
     seat.chatTimes = seat.chatTimes.filter((time) => now - time < 60000);
     if (seat.chatTimes.length >= this.options.chatLimitPerMinute) {
-      return;
+      return false;
     }
     seat.chatTimes.push(now);
     const broadcast: ChatBroadcast = {
       type: "chat",
       fromId: seat.playerId,
       fromName: seat.name,
-      text: text.slice(0, MAX_CHAT_LENGTH),
+      text: trimmed.slice(0, MAX_CHAT_LENGTH),
       at: now,
     };
     this.chatHistory.push(broadcast);
@@ -405,6 +427,7 @@ export class HostSession {
       this.chatHistory.shift();
     }
     this.broadcast(broadcast);
+    return true;
   }
 
   private handleEmote(emoteId: EmoteId, transport: Transport): void {
@@ -412,10 +435,18 @@ export class HostSession {
     if (!seat) {
       return;
     }
+    this.sendEmoteFrom(seat.playerId, emoteId);
+  }
+
+  sendEmoteFrom(playerId: PlayerId, emoteId: EmoteId): boolean {
+    const seat = this.seats.find((entry) => entry.playerId === playerId);
+    if (!seat || seat.isBot) {
+      return false;
+    }
     const now = this.options.now();
     seat.emoteTimes = seat.emoteTimes.filter((time) => now - time < 60000);
     if (seat.emoteTimes.length >= this.options.emoteLimitPerMinute) {
-      return;
+      return false;
     }
     seat.emoteTimes.push(now);
     const broadcast: EmoteBroadcast = {
@@ -426,6 +457,7 @@ export class HostSession {
       at: now,
     };
     this.broadcast(broadcast);
+    return true;
   }
 
   private handleClose(transport: Transport): void {
@@ -580,12 +612,14 @@ export class HostSession {
     if (!this.state) {
       return;
     }
+    const events = [...this.pendingEvents];
     const message = this.updateMessage();
     for (const seat of this.seats) {
       if (seat.transport && seat.connected) {
         this.sendTo(seat.transport, message);
       }
     }
+    this.onUpdateCallback?.(this.state, events);
   }
 
   private broadcastSeats(): void {
@@ -595,6 +629,7 @@ export class HostSession {
         this.sendTo(seat.transport, { type: "seat-update", players });
       }
     }
+    this.onSeatsCallback?.();
   }
 
   private broadcast(message: HostMessage): void {

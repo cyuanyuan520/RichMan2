@@ -10,7 +10,7 @@ import type {
 } from "@/game/core/types";
 import { createRng } from "@/game/core/rng";
 
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 export const MAX_CHAT_LENGTH = 120;
 export const MAX_NAME_LENGTH = 12;
 export const MAX_ID_LENGTH = 64;
@@ -154,7 +154,7 @@ export function actionKey(action: GameAction): string {
 export const helloMessageSchema = z.object({
   type: z.literal("hello"),
   protocol: z.number().int(),
-  contentHash: z.string().max(MAX_ID_LENGTH),
+  contentHash: z.string().max(MAX_ID_LENGTH).optional(),
   token: z.string().max(MAX_ID_LENGTH).optional(),
   name: z.string().trim().min(1).max(MAX_NAME_LENGTH),
   characterId: z.string().max(MAX_ID_LENGTH).optional(),
@@ -214,6 +214,7 @@ export interface WelcomeMessage {
   type: "welcome";
   protocol: number;
   contentHash: string;
+  mapId: string;
   seat: PlayerId;
   token: string;
   resumeSeq: number;

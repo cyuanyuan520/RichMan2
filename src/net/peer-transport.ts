@@ -68,6 +68,15 @@ export function connectToRoom(
   code: string,
   timeoutMs = 15000,
 ): Promise<DataConnection> {
+  return connectRoom(code, timeoutMs).then((result) => result.connection);
+}
+
+export interface RoomConnection {
+  connection: DataConnection;
+  peer: Peer;
+}
+
+export function connectRoom(code: string, timeoutMs = 15000): Promise<RoomConnection> {
   return new Promise((resolve, reject) => {
     const peer = new Peer({ ...peerOptions(), debug: 0 });
     const timer = setTimeout(() => {
@@ -78,7 +87,7 @@ export function connectToRoom(
       const connection = peer.connect(hostPeerId(code), { reliable: true });
       connection.on("open", () => {
         clearTimeout(timer);
-        resolve(connection);
+        resolve({ connection, peer });
       });
       connection.on("error", (error) => {
         clearTimeout(timer);

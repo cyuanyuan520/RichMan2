@@ -93,8 +93,10 @@ src/
 - 主机权威：主机持有完整 `GameState` 并运行引擎；客户端只发送 `ClientIntent`
   （无 `forcedDice`、无 `playerId` 等服务端字段，zod 解析时剥离未知字段）。
   每次意图先经 `getLegalActions` 白名单核对 `actionKey`，非法即 rejected。
-- 消息：`hello`（协议版本 + contentHash 握手 + 可选 token 重连 + 昵称/角色/棋子/机器人难度）
-  → `welcome`（座位、令牌、`resumeSeq` 意图序号、大厅状态、聊天记录、最近事件）；
+- 消息：`hello`（协议版本 + 可选 contentHash + 可选 token 重连 + 昵称/角色/棋子/机器人难度）
+  → `welcome`（座位、令牌、`mapId`、`contentHash`、`resumeSeq` 意图序号、大厅状态、聊天记录、最近事件）；
+  加入者不必预先知道地图：客户端拿到 `welcome.mapId` 后本地组装内容并校验 `contentHash`，
+  不一致立即断开并提示刷新（`PROTOCOL_VERSION = 3`，旧版本被版本门拒绝）；
   `update`（`{seq, snapshot, events, players}`，每步广播，客户端按 seq 幂等应用）；
   `intent`（每客户端递增 seq，主机去重）；`chat`/`emote`（主机限流后广播）；
   `seat-update`；`ping`/`pong` 保活；`rejected`（version/content/started/full/invalid）。
@@ -133,7 +135,29 @@ host.tick(now);                     // 保活 + 机器人/断线座位行动一�
 - 事件批次 `{seq, events}` 供 UI 动画对齐；快照与事件同一批次原子下发；
   `welcome.recentEvents` 供重连后重建日志面板（不重播动画）。
 
+## 表现层（P4）
+
+- `src/store/game-store.ts`：Zustand 唯一状态源。单机模式用 `bootstrapGame` + `reduce`
+  驱动，并按 `aiDelayMs` 定时调用 `chooseAiAction` 自动行动机器人座位；联机模式
+  （`src/store/net-store.ts`）把主机快照/事件或客户端 `update` 原子写入同一 store，
+  UI 无需区分模式；`setOnlineDispatcher` 让 `dispatch` 在联机模式下转发为意图
+  （`toIntent` 剥离 `playerId`/`forcedDice`）。
+- `src/ui/fx/use-director.ts`：事件驱动导演。消费 `fxQueue`，按类型播放骰子摇动、
+  逐格棋子行进、卡牌翻开、金钱飘字、入狱/住院/破产横幅，并在动画期间阻塞弹窗，
+  保证「状态先行、表现随后」且不出现动画与状态错位。
+- `src/ui/board/`：`geometry.ts` 把 40 格映射为 11×11 环形棋盘（每边 10 格，
+  四角为起点/监狱/医院/进监狱）；`layout: "path"` 的地图按 `coord` 百分比定位并
+  以 spring 相机跟随当前行动者（画卷式平移缩放）。`Board` 负责主题背景、格子、
+  棋子、飘字与悬停信息卡。
+- `src/ui/dialogs/`：购买、筹集欠款（含资产管理）、目标选择、遥控骰子、道具店、
+  彩票行、地产管理、玩家详情、结算与提示，全部由 `pending` 决策驱动。
+- `src/ui/screens/`：主菜单、单机设置、联机大厅（房间号/座位/聊天表情）、规则、设置。
+- `src/audio/`：WebAudio 合成音效（`sfx.ts`，无外部素材）与 BGM（`bgm.ts`，
+  使用 `public/assets/audio/bgm` 的两首曲子），音量跟随设置实时生效。
+- `src/lib/event-text.ts`：把 `GameEvent` 翻译为中文日志文案（tone/icon），
+  日志面板与文本层未来可直接替换为多语言字典。
+
 ## 阶段路线
 
-P1 基础与架构（当前）→ P2 完整玩法（卡牌/道具/技能/AI）→ P3 联机 →
-P4 UI/UX 与动画 → P5 集成与部署。
+P1 基础与架构 → P2 完整玩法（卡牌/道具/技能/AI）→ P3 联机 →
+P4 UI/UX 与动画（当前阶段）→ P5 集成与部署。
