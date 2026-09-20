@@ -49,6 +49,8 @@ interface HostSeat {
   emoteTimes: number[];
   lastPingAt: number;
   lastPongAt: number;
+  awaitingPong: boolean;
+  unansweredSince: number;
   lastPingReplyAt: number;
 }
 
@@ -110,6 +112,8 @@ export class HostSession {
         emoteTimes: [],
         lastPingAt: 0,
         lastPongAt: 0,
+        awaitingPong: false,
+        unansweredSince: 0,
         lastPingReplyAt: 0,
       };
     });
@@ -202,6 +206,8 @@ export class HostSession {
         const seat = this.seatForTransport(transport);
         if (seat) {
           seat.lastPongAt = this.options.now();
+          seat.awaitingPong = false;
+          seat.unansweredSince = 0;
         }
         break;
       }
@@ -278,8 +284,10 @@ export class HostSession {
       this.strike(transport, "full", "房间已满");
       return;
     }
-    if (seat.transport && seat.transport !== transport) {
-      seat.transport.close();
+    const hadLiveIncumbent =
+      seat.transport !== null && seat.transport !== transport;
+    if (hadLiveIncumbent) {
+      seat.transport?.close();
     }
     const now = this.options.now();
     seat.transport = transport;
@@ -288,6 +296,8 @@ export class HostSession {
     seat.disconnectedAt = null;
     seat.lastPingAt = now;
     seat.lastPongAt = now;
+    seat.awaitingPong = false;
+    seat.unansweredSince = 0;
     seat.name = message.name;
     if (message.characterId && this.content.characters[message.characterId]) {
       seat.characterId = message.characterId;
@@ -298,7 +308,7 @@ export class HostSession {
     if (message.botDifficulty) {
       seat.botDifficulty = message.botDifficulty;
     }
-    if (!matchedByToken || wasClaimed) {
+    if (!matchedByToken || (wasClaimed && hadLiveIncumbent)) {
       seat.token = this.newToken();
     }
     this.strikes.delete(transport);
@@ -329,7 +339,7 @@ export class HostSession {
   ): void {
     const seat = this.seatForTransport(transport);
     if (!seat) {
-      this.reject(transport, "invalid", "尚未加入房间");
+      this.strike(transport, "invalid", "尚未加入房间");
       return;
     }
     if (seq <= seat.lastIntentSeq) {
@@ -492,13 +502,22 @@ export class HostSession {
       }
       if (now - seat.lastPingAt >= this.options.pingIntervalMs) {
         seat.lastPingAt = now;
+        if (!seat.awaitingPong) {
+          seat.awaitingPong = true;
+          seat.unansweredSince = now;
+        }
         this.sendTo(seat.transport, { type: "ping", t: now });
       }
-      if (now - seat.lastPongAt > this.options.livenessTimeoutMs) {
+      if (
+        seat.awaitingPong &&
+        now - seat.unansweredSince > this.options.livenessTimeoutMs
+      ) {
         const transport = seat.transport;
         seat.transport = null;
         seat.connected = false;
         seat.disconnectedAt = now;
+        seat.awaitingPong = false;
+        seat.unansweredSince = 0;
         this.broadcastSeats();
         transport.close();
       }
@@ -506,10 +525,10 @@ export class HostSession {
   }
 
   tick(now: number = this.options.now()): boolean {
+    this.maintainLiveness(now);
     if (!this.startedGame || !this.state || this.state.phase === "finished") {
       return false;
     }
-    this.maintainLiveness(now);
     const pending = this.state.pending;
     const actorId = pending
       ? pending.playerId

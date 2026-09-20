@@ -63,6 +63,7 @@ export class ClientSession {
     if (previous) {
       previous.onMessage(() => {});
       previous.onClose(() => {});
+      previous.close();
     }
     this.transport = transport;
     transport.onClose(() => {

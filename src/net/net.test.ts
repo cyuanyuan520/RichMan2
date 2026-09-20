@@ -594,6 +594,124 @@ describe("host/client over memory transport", () => {
     expect(rejects).toContain("对局已结束");
   });
 
+  it("keeps a healthy client through a long lobby wait", async () => {
+    const clock = { value: 0 };
+    const host = new HostSession(makeSetup([false, false, true, true]), content, {
+      now: () => clock.value,
+      pingIntervalMs: 1000,
+      livenessTimeoutMs: 2500,
+    });
+    const [hostSide, clientSide] = memoryTransports("host", "client");
+    host.connect(hostSide);
+    const client = new ClientSession();
+    client.connect(clientSide, HELLO);
+    await flush();
+
+    clock.value = 60000;
+    host.begin();
+    clock.value = 60001;
+    host.tick(clock.value);
+    await flush();
+    expect(clientSide.isOpen()).toBe(true);
+
+    clock.value = 75000;
+    host.tick(clock.value);
+    await flush();
+    expect(clientSide.isOpen()).toBe(true);
+    expect(
+      host.seatInfos().find((entry) => entry.playerId === "p2")?.connected,
+    ).toBe(true);
+  });
+
+  it("waits a full unanswered interval before disconnecting a wedged client", async () => {
+    const clock = { value: 0 };
+    const host = new HostSession(makeSetup([false, false, true, true]), content, {
+      now: () => clock.value,
+      disconnectGraceMs: 0,
+      pingIntervalMs: 1000,
+      livenessTimeoutMs: 2500,
+      hostSeat: -1,
+    });
+    const [hostSide, clientSide] = memoryTransports("host", "client");
+    host.connect(hostSide);
+    clientSide.send({ ...HELLO, type: "hello" });
+    await flush();
+    host.begin();
+    clock.value = 60001;
+    host.tick(clock.value);
+    await flush();
+    expect(clientSide.isOpen()).toBe(true);
+
+    clock.value = 75000;
+    host.tick(clock.value);
+    await flush();
+    expect(clientSide.isOpen()).toBe(false);
+  });
+
+  it("keeps the token when rebinding a disconnected seat", async () => {
+    const host = new HostSession(makeSetup([false, false, true, true]), content, {
+      hostSeat: -1,
+    });
+    const [hostSide, clientSide] = memoryTransports("host", "client");
+    host.connect(hostSide);
+    const client = new ClientSession();
+    client.connect(clientSide, HELLO);
+    await flush();
+    host.begin();
+    await flush();
+    const token = client.token!;
+    client.close();
+    await flush();
+
+    const [hostSide2, clientSide2] = memoryTransports("host", "client2");
+    host.connect(hostSide2);
+    const client2 = new ClientSession();
+    client2.connect(clientSide2, { ...HELLO, token });
+    await flush();
+    expect(client2.seat).toBe(asPlayerId("p1"));
+    expect(client2.token).toBe(token);
+
+    client2.close();
+    await flush();
+    const [hostSide3, clientSide3] = memoryTransports("host", "client3");
+    host.connect(hostSide3);
+    const client3 = new ClientSession();
+    client3.connect(clientSide3, { ...HELLO, token });
+    await flush();
+    expect(client3.seat).toBe(asPlayerId("p1"));
+  });
+
+  it("rotates the token when taking over a live connection", async () => {
+    const host = new HostSession(makeSetup([false, false, true, true]), content);
+    const [hostSide, clientSide] = memoryTransports("host", "client");
+    host.connect(hostSide);
+    const client = new ClientSession();
+    client.connect(clientSide, HELLO);
+    await flush();
+    host.begin();
+    await flush();
+    const token = client.token!;
+
+    const [hostSide2, clientSide2] = memoryTransports("host", "client2");
+    host.connect(hostSide2);
+    const client2 = new ClientSession();
+    client2.connect(clientSide2, { ...HELLO, token });
+    await flush();
+    expect(client2.seat).toBe(asPlayerId("p2"));
+    expect(client2.token).not.toBe(token);
+  });
+
+  it("strikes unjoined transports that spam intents", async () => {
+    const host = new HostSession(makeSetup([false, false, true, true]), content);
+    const [hostSide, clientSide] = memoryTransports("host", "client");
+    host.connect(hostSide);
+    for (let i = 0; i < 6; i += 1) {
+      clientSide.send({ type: "intent", seq: i + 1, intent: { type: "roll-dice" } });
+    }
+    await flush();
+    expect(clientSide.isOpen()).toBe(false);
+  });
+
   it("plays a full bot-only game to completion through ticks", () => {
     const host = new HostSession(makeSetup([true, true, true, true]), content);
     host.begin();

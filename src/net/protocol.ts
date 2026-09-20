@@ -10,7 +10,7 @@ import type {
 } from "@/game/core/types";
 import { createRng } from "@/game/core/rng";
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 export const MAX_CHAT_LENGTH = 120;
 export const MAX_NAME_LENGTH = 12;
 export const MAX_ID_LENGTH = 64;
