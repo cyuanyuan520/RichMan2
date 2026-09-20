@@ -247,7 +247,7 @@ export class HostSession {
   private handleHello(
     message: {
       protocol: number;
-      engine?: number;
+      engine: number;
       contentHash?: string;
       token?: string;
       name: string;
@@ -265,7 +265,7 @@ export class HostSession {
       this.strike(transport, "version", "客户端版本不一致，请刷新页面");
       return;
     }
-    if (message.engine !== undefined && message.engine !== STATE_VERSION) {
+    if (message.engine !== STATE_VERSION) {
       this.strike(transport, "version", "客户端引擎版本不一致，请刷新页面");
       return;
     }

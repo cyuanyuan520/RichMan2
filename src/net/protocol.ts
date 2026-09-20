@@ -154,7 +154,7 @@ export function actionKey(action: GameAction): string {
 export const helloMessageSchema = z.object({
   type: z.literal("hello"),
   protocol: z.number().int(),
-  engine: z.number().int().optional(),
+  engine: z.number().int(),
   contentHash: z.string().max(MAX_ID_LENGTH).optional(),
   token: z.string().max(MAX_ID_LENGTH).optional(),
   name: z.string().trim().min(1).max(MAX_NAME_LENGTH),

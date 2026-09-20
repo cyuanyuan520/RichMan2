@@ -37,6 +37,7 @@ function makeSetup(bots: boolean[], seed = 42): GameSetup {
 
 const HELLO = {
   protocol: PROTOCOL_VERSION,
+  engine: STATE_VERSION,
   contentHash: content.contentHash,
   name: "测试玩家",
 };
@@ -119,6 +120,7 @@ describe("host/client over memory transport", () => {
     const client = new ClientSession({ onWelcome: (welcome) => welcomes.push(welcome) });
     client.connect(clientSide, {
       protocol: PROTOCOL_VERSION,
+      engine: STATE_VERSION,
       name: "后进房",
     });
     await flush();

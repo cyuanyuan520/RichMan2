@@ -51,6 +51,7 @@ interface NetStore {
   status: NetStatus;
   error: string | null;
   seats: SeatInfo[];
+  retryable: boolean;
   chat: ChatLine[];
   emote: { fromName: string; emoteId: EmoteId; at: number; id: number } | null;
   lobbyConfig: OnlineLobbyConfig;
@@ -220,6 +221,7 @@ export const useNetStore = create<NetStore>((set, get) => ({
   status: "idle",
   error: null,
   seats: [],
+  retryable: false,
   chat: [],
   emote: null,
   lobbyConfig: {
@@ -237,7 +239,15 @@ export const useNetStore = create<NetStore>((set, get) => ({
     teardown();
     const config = get().lobbyConfig;
     const code = randomRoomCode();
-    set({ role: "host", roomCode: code, status: "connecting", error: null, seats: [], chat: [] });
+    set({
+      role: "host",
+      roomCode: code,
+      status: "connecting",
+      error: null,
+      retryable: false,
+      seats: [],
+      chat: [],
+    });
     const content = buildGameContent(config.mapId);
     const setup = buildHostSetup(config);
     const session = new HostSession(setup, content, {
@@ -305,7 +315,15 @@ export const useNetStore = create<NetStore>((set, get) => ({
     sessionGeneration += 1;
     const generation = sessionGeneration;
     verifiedContentHash = null;
-    set({ role: "client", roomCode: code, status: "connecting", error: null, seats: [], chat: [] });
+    set({
+      role: "client",
+      roomCode: code,
+      status: "connecting",
+      error: null,
+      retryable: false,
+      seats: [],
+      chat: [],
+    });
     const session = new ClientSession({
       onWelcome: (welcome) => {
         if (generation !== sessionGeneration) {
@@ -334,6 +352,8 @@ export const useNetStore = create<NetStore>((set, get) => ({
         reconnectAttempts = 0;
         set({
           status: welcome.lobby ? "lobby" : "playing",
+          error: null,
+          retryable: false,
           seats: welcome.players,
           chat: welcome.chat.map((line) => ({
             id: (chatSeq += 1),
@@ -376,12 +396,13 @@ export const useNetStore = create<NetStore>((set, get) => ({
         if (generation !== sessionGeneration) {
           return;
         }
-        if (rejected.code === "version" || rejected.code === "content" || rejected.code === "closed") {
-          set({ status: "error", error: rejected.reason });
-          teardown();
-        } else {
-          useGameStore.getState().notify(rejected.reason, "bad");
+        if (rejected.code === "closed") {
+          set({ status: "closed", error: rejected.reason, retryable: true });
+          scheduleReconnect(generation);
+          return;
         }
+        set({ status: "error", error: rejected.reason, retryable: false });
+        teardown();
       },
       onChat: (line) => {
         if (generation !== sessionGeneration) {
@@ -408,7 +429,7 @@ export const useNetStore = create<NetStore>((set, get) => ({
           return;
         }
         if (get().status !== "idle" && get().status !== "error") {
-          set({ status: "closed", error: "与主机的连接已断开" });
+          set({ status: "closed", error: "与主机的连接已断开", retryable: true });
           scheduleReconnect(generation);
         }
       },
@@ -416,6 +437,15 @@ export const useNetStore = create<NetStore>((set, get) => ({
     client = session;
     void connectRoom(code)
       .then(({ connection, peer: roomPeer }) => {
+        if (generation !== sessionGeneration) {
+          try {
+            connection.close();
+          } catch {
+            // Already closed.
+          }
+          roomPeer.destroy();
+          return;
+        }
         clientPeer = roomPeer;
         session.connect(peerTransport(connection), {
           name: settings.playerName,
@@ -432,11 +462,11 @@ export const useNetStore = create<NetStore>((set, get) => ({
         }
         const message = error instanceof Error ? error.message : "连接房间失败";
         if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-          set({ status: "closed", error: `${message}，正在重试…` });
+          set({ status: "closed", error: `${message}，正在重试…`, retryable: true });
           scheduleReconnect(generation);
           return;
         }
-        set({ status: "error", error: `多次重连失败：${message}` });
+        set({ status: "error", error: `多次重连失败：${message}`, retryable: false });
       });
 
     setOnlineDispatcher((action) => {

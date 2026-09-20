@@ -7,6 +7,12 @@ import { applyRemoteSnapshot, setOnlineDispatcher, useGameStore } from "./game-s
 import { useNetStore } from "./net-store";
 
 const connectRoomMock = vi.fn();
+const connectHolder = vi.hoisted(() => ({
+  pending: null as null | {
+    resolve: (value: unknown) => void;
+    reject: (error: unknown) => void;
+  },
+}));
 
 vi.mock("@/net/peer-transport", () => ({
   ROOM_CODE_LENGTH: 5,
@@ -18,8 +24,18 @@ vi.mock("@/net/peer-transport", () => ({
     throw new Error("createRoomPeer is not used in these tests");
   },
   waitForPeerOpen: async () => "richman2-abcde",
-  connectRoom: (...args: unknown[]) => connectRoomMock(...args),
-  connectToRoom: (...args: unknown[]) => connectRoomMock(...args),
+  connectRoom: (...args: unknown[]) => {
+    connectRoomMock(...args);
+    return new Promise((resolve, reject) => {
+      connectHolder.pending = { resolve, reject };
+    });
+  },
+  connectToRoom: (...args: unknown[]) => {
+    connectRoomMock(...args);
+    return new Promise((resolve, reject) => {
+      connectHolder.pending = { resolve, reject };
+    });
+  },
   peerTransport: () => {
     throw new Error("peerTransport is not used in these tests");
   },
@@ -46,6 +62,7 @@ function seedOnlineGame(): void {
 
 beforeEach(() => {
   connectRoomMock.mockReset();
+  connectHolder.pending = null;
   setOnlineDispatcher(null);
 });
 
@@ -82,9 +99,10 @@ describe("net store", () => {
 
   it("retries the connection when joining fails and exposes a manual retry", async () => {
     vi.useFakeTimers();
-    connectRoomMock.mockRejectedValue(new Error("连接超时"));
 
     useNetStore.getState().joinRoom("abcde");
+    await vi.advanceTimersByTimeAsync(0);
+    connectHolder.pending!.reject(new Error("连接超时"));
     await vi.advanceTimersByTimeAsync(0);
 
     expect(connectRoomMock).toHaveBeenCalledTimes(1);
@@ -96,15 +114,39 @@ describe("net store", () => {
 
     await vi.advanceTimersByTimeAsync(2600);
     expect(connectRoomMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+    connectHolder.pending!.reject(new Error("连接超时"));
+    await vi.advanceTimersByTimeAsync(0);
 
     useNetStore.getState().reconnect();
     await vi.advanceTimersByTimeAsync(0);
     expect(connectRoomMock.mock.calls.length).toBeGreaterThanOrEqual(3);
   });
 
+  it("ignores a late connect result after the player left", async () => {
+    vi.useFakeTimers();
+    const closed = vi.fn();
+    const destroyed = vi.fn();
+    const sent: unknown[] = [];
+
+    useNetStore.getState().joinRoom("ABCDE");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(connectHolder.pending).not.toBeNull();
+
+    useNetStore.getState().leave();
+    connectHolder.pending!.resolve({
+      connection: { close: closed, open: true, send: (m: unknown) => sent.push(m) },
+      peer: { destroy: destroyed },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(closed).toHaveBeenCalled();
+    expect(destroyed).toHaveBeenCalled();
+    expect(sent).toHaveLength(0);
+    expect(useNetStore.getState().role).toBeNull();
+  });
+
   it("queues a client with the lobby character and token selection", async () => {
     vi.useFakeTimers();
-    connectRoomMock.mockRejectedValue(new Error("nope"));
     useNetStore.getState().setLobbyConfig({
       characterId: characters[2].id,
       tokenId: tokens[3].id,
@@ -120,10 +162,12 @@ describe("net store", () => {
 
   it("stops retrying after the attempt budget and reports an error", async () => {
     vi.useFakeTimers();
-    connectRoomMock.mockRejectedValue(new Error("连接超时"));
     useNetStore.getState().joinRoom("qqqqq");
+    await vi.advanceTimersByTimeAsync(0);
 
     for (let attempt = 0; attempt < 8; attempt += 1) {
+      connectHolder.pending?.reject(new Error("连接超时"));
+      await vi.advanceTimersByTimeAsync(0);
       await vi.advanceTimersByTimeAsync(2600);
     }
 

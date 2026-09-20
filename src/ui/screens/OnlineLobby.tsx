@@ -16,6 +16,7 @@ export function OnlineLobby({ onNavigate }: { onNavigate: (route: MenuRoute) => 
   const roomCode = useNetStore((state) => state.roomCode);
   const status = useNetStore((state) => state.status);
   const error = useNetStore((state) => state.error);
+  const retryable = useNetStore((state) => state.retryable);
   const seats = useNetStore((state) => state.seats);
   const config = useNetStore((state) => state.lobbyConfig);
   const setLobbyConfig = useNetStore((state) => state.setLobbyConfig);
@@ -192,9 +193,14 @@ export function OnlineLobby({ onNavigate }: { onNavigate: (route: MenuRoute) => 
               {status === "connecting" ? "正在连接…" : "加入房间"}
             </Button>
             {error ? (
-              <p className="rounded-xl border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-200">
-                {error}
-              </p>
+              <div className="flex items-center gap-2 rounded-xl border border-rose-400/30 bg-rose-500/10 px-3 py-2">
+                <span className="flex-1 text-[11px] text-rose-200">{error}</span>
+                {retryable ? (
+                  <Button size="sm" tone="ghost" onClick={reconnect}>
+                    重试
+                  </Button>
+                ) : null}
+              </div>
             ) : null}
             <p className="text-[11px] leading-relaxed text-paper-200/60">
               联机使用 PeerJS 点对点连接：房主为唯一权威，支持断线重连（本地保存房间令牌）、
@@ -275,7 +281,7 @@ export function OnlineLobby({ onNavigate }: { onNavigate: (route: MenuRoute) => 
             {error ? (
               <div className="flex items-center gap-2 rounded-xl border border-rose-400/30 bg-rose-500/10 px-3 py-2">
                 <span className="flex-1 text-[11px] text-rose-200">{error}</span>
-                {status === "closed" || status === "error" ? (
+                {retryable ? (
                   <Button
                     size="sm"
                     tone="ghost"

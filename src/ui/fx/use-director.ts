@@ -57,8 +57,16 @@ export function useDirector(): DirectorState {
   }, []);
 
   if (game && game.seq !== syncedSeq) {
+    const missedUpdates = syncedSeq >= 0 && game.seq - syncedSeq > 1;
     setSyncedSeq(game.seq);
     setDisplay((current) => {
+      if (missedUpdates) {
+        const next: Record<PlayerId, number> = {};
+        for (const player of game.players) {
+          next[player.id] = player.position;
+        }
+        return next;
+      }
       let changed = false;
       const next: Record<PlayerId, number> = { ...current };
       for (const player of game.players) {

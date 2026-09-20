@@ -78,6 +78,28 @@ describe("event director", () => {
     expect(useGameStore.getState().animating).toBe(false);
   });
 
+  it("resyncs token positions when the state jumps (reconnect/missed updates)", async () => {
+    const { result } = renderHook(() => useDirector());
+    act(() => {
+      useGameStore.getState().startLocal(makeSetup());
+    });
+    await waitFor(() => expect(result.current.busy).toBe(false), { timeout: 5000 });
+
+    const localId = useGameStore.getState().localPlayerId!;
+    const before = useGameStore.getState().game!;
+    const jumped = structuredClone(before);
+    jumped.seq = before.seq + 5;
+    jumped.players[0].position = 17;
+
+    act(() => {
+      useGameStore.setState({ game: jumped });
+    });
+
+    await waitFor(() => expect(result.current.display[localId]).toBe(17), {
+      timeout: 3000,
+    });
+  });
+
   it("keeps draining events for a long AI chain without getting stuck", async () => {
     useGameStore.getState().startLocal(makeSetup(30));
     const { result } = renderHook(() => useDirector());
