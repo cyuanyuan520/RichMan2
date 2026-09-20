@@ -84,13 +84,44 @@ src/
   道具引用完整性）；生产构建不重复执行（测试是内容质量的把关点）。
 - `buildGameContent(mapId)` 组装注册表并计算 `contentHash`，供引擎与联机校验使用。
 
-## 联机模型（P3 实施）
+## 联机模型（P3 已实现）
 
-- 主机权威：主机运行引擎，客户端只发送意图（roll / buy / use-item / chat…）。
-- 协议：zod 校验 + 版本号 + 单调 seq；状态快照 + 事件流用于重连与动画对齐。
-- 断线重连：玩家令牌（本地存储）映射座位；座位保留，重连续玩。
-- PeerJS broker 默认公共云，`NEXT_PUBLIC_PEERJS_*` 可切换到自建服务器；
-  ICE 服务器可配置（STUN/TURN）。
+- 目录：`src/net/protocol.ts`（消息/意图 zod 校验、`PROTOCOL_VERSION`、快照脱敏）、
+  `src/net/transport.ts`（`Transport` 抽象 + 内存对，用于测试）、
+  `src/net/peer-transport.ts`（PeerJS 适配：房间号 → peer id、数据通道、超时与错误）、
+  `src/net/host.ts`（`HostSession` 主机权威循环）、`src/net/client.ts`（`ClientSession`）。
+- 主机权威：主机持有完整 `GameState` 并运行引擎；客户端只发送 `ClientIntent`
+  （无 `forcedDice`、无 `playerId` 等服务端字段，zod 解析时剥离未知字段）。
+  每次意图先经 `getLegalActions` 白名单核对 `actionKey`，非法即 rejected。
+- 消息：`hello`（协议版本 + contentHash 握手 + 可选 token 重连 + 昵称/角色/棋子）
+  → `welcome`（座位、令牌、大厅状态、聊天记录）；
+  `update`（`{seq, snapshot, events, players}`，每步广播，客户端按 seq 幂等应用）；
+  `intent`（每客户端递增 seq，主机去重）；`chat`/`emote`（主机限流后广播）；
+  `seat-update`；`rejected`（version/content/started/full/invalid）。
+- 快照脱敏：`sanitizeState` 抹去 `rng`/`seed`/牌堆与弃牌堆，客户端无法预知骰子与牌序。
+- 断线重连：座位令牌持久化，重连 hello 携带 token 即可恢复原座位并收到最新快照；
+  开局后无 token 的连接被拒绝（不做观战者）。
+- AI 补位：`HostSession.tick()` 在轮到机器人座位或断线超过宽限期的人类座位时，
+  用 `chooseAiAction` 自动行动；`autoPlayUntil` 支持测试与单机全自动对局。
+- 房间：`peer-transport.ts` 生成 5 位房间号（去除易混字符）映射到
+  `richman2-<code>` PeerJS id；`NEXT_PUBLIC_PEERJS_*` 可切换自建 broker。
+
+### 主机循环接口
+
+```ts
+const host = new HostSession(setup, content);
+host.connect(transport);            // 接受 PeerJS 或内存传输
+host.begin();                       // 开局（未认领的人类座位自动转为 AI）
+host.submitIntent(playerId, intent) // 本地玩家/中继意图，返回 { ok, error? }
+host.tick();                        // 机器人或断线座位行动一步（浏览器定时调用）
+```
+
+### 安全与一致性
+
+- 客户端消息全部经 zod 校验；非法消息回 `rejected` 不打断对局。
+- 意图幂等：`seq <= lastIntentSeq` 直接丢弃，避免重连重传重复执行。
+- 内容一致性：`contentHash` 覆盖地图/卡牌/道具/角色全部数值，握手不一致拒绝加入。
+- 事件批次 `{seq, events}` 供 UI 动画对齐；快照与事件同一批次原子下发。
 
 ## 阶段路线
 

@@ -182,6 +182,58 @@ describe("debt queue", () => {
     expect(result.state.pending).toBeNull();
   });
 
+  it("skips a bankrupt creditor when settling shares", () => {
+    const state = makeGame({
+      playerCount: 3,
+      characters: ["xue-ba", "xue-ba", "xue-ba"],
+    });
+    state.players[0]!.money = 0;
+    state.players[2]!.status = "bankrupt";
+    state.players[2]!.money = 0;
+    state.pending = {
+      kind: "raise-funds",
+      playerId: P1,
+      creditorId: P2,
+      amount: 700,
+      reason: "card",
+      shares: [
+        { creditorId: P2, amount: 400, reason: "card" },
+        { creditorId: P3, amount: 300, reason: "card" },
+      ],
+    };
+    const result = act(state, { type: "raise-funds-done", playerId: P1 });
+    expect(result.state.pending).toBeNull();
+    expect(result.state.players[0]!.money).toBe(0);
+    expect(result.state.players[1]!.money).toBe(STARTING + 400);
+    expect(result.state.players[2]!.money).toBe(0);
+  });
+
+  it("uses the moved distance as dice for card movement landings", () => {
+    const base = buildGameContent("ink");
+    const card: CardDef = {
+      id: "test-backstep",
+      deck: "chance",
+      title: "测试卡",
+      text: "测试用后退卡",
+      effects: [{ kind: "move-steps", steps: -5 }],
+    };
+    const custom: GameContent = {
+      ...base,
+      cards: { ...base.cards, "test-backstep": card },
+    };
+    const state = makeGame({ characters: ["xue-ba", "xue-ba"] });
+    state.players[0]!.position = 31;
+    state.chanceDeck = ["test-backstep"];
+    grantTile(state, 28, P2);
+    const result = reduce(
+      state,
+      { type: "roll-dice", playerId: P1, forcedDice: [1, 1] },
+      custom,
+    );
+    expect(result.state.players[0]!.position).toBe(28);
+    expect(result.state.players[1]!.money).toBe(STARTING + 20);
+  });
+
   it("clears a stale own pending before going bankrupt", () => {
     const state = makeGame({ characters: ["xue-ba", "xue-ba"] });
     state.pending = {

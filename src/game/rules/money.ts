@@ -67,14 +67,42 @@ export function bankruptPlayer(
   if (balance !== 0) {
     addMoney(state, events, playerId, -balance, "bankruptcy");
   }
-  const creditor =
-    balance > 0 && creditorId && creditorId !== playerId
-      ? state.players.find(
-          (entry) => entry.id === creditorId && entry.status !== "bankrupt",
-        )
+  const pending = state.pending;
+  const ownDebt =
+    pending?.kind === "raise-funds" && pending.playerId === playerId
+      ? pending
       : undefined;
-  if (creditor && balance > 0) {
-    addMoney(state, events, creditor.id, balance, "bankruptcy");
+  if (balance > 0) {
+    const shares = ownDebt?.shares ?? [];
+    if (shares.length > 0) {
+      const total = shares.reduce((sum, share) => sum + share.amount, 0);
+      let remaining = balance;
+      for (const share of shares) {
+        if (remaining <= 0 || share.amount <= 0 || !share.creditorId) {
+          continue;
+        }
+        const creditor = state.players.find(
+          (entry) =>
+            entry.id === share.creditorId && entry.status !== "bankrupt",
+        );
+        if (!creditor) {
+          continue;
+        }
+        const cut = Math.min(
+          remaining,
+          Math.round((balance * share.amount) / Math.max(1, total)),
+        );
+        addMoney(state, events, creditor.id, cut, "bankruptcy");
+        remaining -= cut;
+      }
+    } else if (creditorId && creditorId !== playerId) {
+      const creditor = state.players.find(
+        (entry) => entry.id === creditorId && entry.status !== "bankrupt",
+      );
+      if (creditor) {
+        addMoney(state, events, creditor.id, balance, "bankruptcy");
+      }
+    }
   }
   player.status = "bankrupt";
   player.money = 0;
