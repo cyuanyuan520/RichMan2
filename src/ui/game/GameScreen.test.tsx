@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GameSetup } from "@/game/core/types";
 import { asMapId } from "@/game/core/ids";
@@ -54,10 +54,12 @@ describe("game screen", () => {
 
     const roll = await screen.findByText(/掷骰子/, undefined, { timeout: 15000 });
     await waitFor(() => expect(roll.closest("button")?.disabled).toBe(false), { timeout: 15000 });
-    expect(game3Round()).toBeGreaterThan(0);
+
+    const seqBefore = useGameStore.getState().game!.seq;
+    fireEvent.click(roll.closest("button")!);
+    await waitFor(
+      () => expect(useGameStore.getState().game!.seq).toBeGreaterThan(seqBefore),
+      { timeout: 5000 },
+    );
   }, 20000);
 });
-
-function game3Round(): number {
-  return useGameStore.getState().game?.round ?? 0;
-}

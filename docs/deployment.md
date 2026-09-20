@@ -42,7 +42,10 @@ npx vercel --prod     # 生产部署
 | `NEXT_PUBLIC_PEERJS_PATH` | 信令路径，默认 `/` |
 | `NEXT_PUBLIC_PEERJS_SECURE` | `false` 时使用 ws://（仅本地调试），默认 https/wss |
 | `NEXT_PUBLIC_PEERJS_KEY` | 自建服务器的 `key`，与服务端 `--key` 一致 |
-| `NEXT_PUBLIC_ICE_SERVERS` | 追加的 ICE 服务器，JSON 数组：`[{"urls":"turn:turn.example.com","username":"u","credential":"p"}]` |
+| `NEXT_PUBLIC_ICE_SERVERS` | 覆盖 PeerJS 默认 ICE 配置的 JSON 数组，需自行包含 STUN：`[{"urls":"stun:stun.l.google.com:19302"},{"urls":"turn:turn.example.com","username":"u","credential":"p"}]` |
+
+> 注意：设置 `NEXT_PUBLIC_ICE_SERVERS` 会**替换**而不是合并 PeerJS 内置 ICE 列表，
+> 所以 JSON 里必须同时写回你需要的公共 STUN 服务器，否则只剩你列出的 TURN。
 
 复制 `.env.example` 为 `.env.local` 即可本地调试。
 
@@ -68,7 +71,8 @@ NEXT_PUBLIC_ICE_SERVERS=[{"urls":"turn:turn.example.com:3478","username":"user",
 ### 自建 PeerJS 服务器（可选）
 
 ```bash
-npx peerjs --port 9000 --path /peer --key my-peer-key
+# server 包名是 peer（提供 peerjs 可执行文件）；无需全局安装
+npx --yes peer --port 9000 --path /peer --key my-peer-key
 ```
 
 生产环境请置于 HTTPS 反向代理之后，并把上表变量指向该域名（`secure` 留默认即可）。
@@ -91,7 +95,8 @@ npx peerjs --port 9000 --path /peer --key my-peer-key
 | 房间码加入失败/房间号冲突 | 确认房间码 5 位、房主仍在等待；重开房间会生成新码 |
 | 双方能看到棋盘但动不了 | 只有当前行动者（或决策归属者）可以操作；等待回合轮转或对方决策 |
 | 提示「游戏内容与主机不一致」 | 双方部署版本不同，刷新两人页面到同一构建 |
-| 断线后提示多次重连失败 | 点「重连」手动重试；仍失败则让房主重开房间 |
+| 断线后提示多次重连失败 | 点界面上的「重连」手动重试（会重置重试次数）；仍失败则返回主菜单重新加入房间 |
+| 提示「联机模块加载失败」 | 进入联机时才会按需加载 P2P 模块，弱网/拦截环境下可能失败；刷新页面或检查网络后重试 |
 | 移动端无法操作 | 当前版本仅面向 PC 桌面浏览器 |
 
 ## 7. 性能备忘

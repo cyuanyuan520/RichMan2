@@ -26,11 +26,41 @@ import {
 
 type PeerTransportModule = typeof import("@/net/peer-transport");
 
+const PEER_MODULE_TIMEOUT_MS = 10000;
+
 let peerTransportModule: Promise<PeerTransportModule> | null = null;
 
 function loadPeerTransport(): Promise<PeerTransportModule> {
-  peerTransportModule ??= import("@/net/peer-transport");
-  return peerTransportModule;
+  if (!peerTransportModule) {
+    const loading = import("@/net/peer-transport").catch((error: unknown) => {
+      peerTransportModule = null;
+      throw error;
+    });
+    peerTransportModule = loading;
+  }
+  const loading = peerTransportModule;
+  return new Promise<PeerTransportModule>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error("联机模块加载超时，请检查网络后重试"));
+    }, PEER_MODULE_TIMEOUT_MS);
+    loading.then(
+      (module) => {
+        clearTimeout(timer);
+        resolve(module);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+function peerModuleErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.includes("加载超时")) {
+    return error.message;
+  }
+  return "联机模块加载失败，请检查网络后重试";
 }
 
 export type NetRole = "host" | "client";
@@ -160,7 +190,8 @@ function scheduleReconnect(generation: number): void {
   if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
     useNetStore.setState({
       status: "error",
-      error: "多次重连失败，请返回主菜单重新加入房间",
+      error: "多次重连失败，请点击重连或返回主菜单重新加入",
+      retryable: true,
     });
     return;
   }
@@ -277,6 +308,9 @@ export const useNetStore = create<NetStore>((set, get) => ({
           session.connect(peerTransport(connection));
         });
         roomPeer.on("error", (error) => {
+          if (host !== session) {
+            return;
+          }
           const message = String((error as Error)?.message ?? error);
           if (message.includes("is taken") || message.includes("unavailable-id")) {
             set({ status: "error", error: "房间号冲突，请重试" });
@@ -302,7 +336,7 @@ export const useNetStore = create<NetStore>((set, get) => ({
       .catch((error: unknown) => {
         set({
           status: "error",
-          error: error instanceof Error ? error.message : "无法加载联机模块",
+          error: peerModuleErrorMessage(error),
         });
       });
 
@@ -489,7 +523,7 @@ export const useNetStore = create<NetStore>((set, get) => ({
           scheduleReconnect(generation);
           return;
         }
-        set({ status: "error", error: `多次重连失败：${message}`, retryable: false });
+        set({ status: "error", error: `多次重连失败：${message}`, retryable: true });
       });
 
     setOnlineDispatcher((action) => {

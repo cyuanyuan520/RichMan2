@@ -32,7 +32,7 @@ export interface PeerEndpointOptions {
 }
 
 export interface PeerIceConfig {
-  iceServers?: RTCIceServer[];
+  config?: { iceServers: RTCIceServer[] };
   key?: string;
 }
 
@@ -43,7 +43,7 @@ export function iceConfig(): PeerIceConfig {
     try {
       const parsed = JSON.parse(raw) as RTCIceServer[];
       if (Array.isArray(parsed) && parsed.length > 0) {
-        config.iceServers = parsed;
+        config.config = { iceServers: parsed };
       }
     } catch {
       // Ignore malformed JSON; fall back to PeerJS defaults.

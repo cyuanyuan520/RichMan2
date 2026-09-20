@@ -13,6 +13,11 @@ const connectHolder = vi.hoisted(() => ({
     reject: (error: unknown) => void;
   },
 }));
+const createPeerHolder = vi.hoisted(() => ({
+  impl: (() => {
+    throw new Error("createRoomPeer is not used in these tests");
+  }) as () => unknown,
+}));
 
 vi.mock("@/net/peer-transport", () => ({
   ROOM_CODE_LENGTH: 5,
@@ -20,9 +25,7 @@ vi.mock("@/net/peer-transport", () => ({
   hostPeerId: (code: string) => `richman2-${code}`,
   peerOptions: () => ({}),
   iceConfig: () => ({}),
-  createRoomPeer: () => {
-    throw new Error("createRoomPeer is not used in these tests");
-  },
+  createRoomPeer: () => createPeerHolder.impl(),
   waitForPeerOpen: async () => "richman2-abcde",
   connectRoom: (...args: unknown[]) => {
     connectRoomMock(...args);
@@ -63,6 +66,9 @@ function seedOnlineGame(): void {
 beforeEach(() => {
   connectRoomMock.mockReset();
   connectHolder.pending = null;
+  createPeerHolder.impl = () => {
+    throw new Error("createRoomPeer is not used in these tests");
+  };
   setOnlineDispatcher(null);
 });
 
@@ -174,8 +180,35 @@ describe("net store", () => {
     const state = useNetStore.getState();
     expect(state.status).toBe("error");
     expect(state.error).toContain("多次重连失败");
+    expect(state.retryable).toBe(true);
     const callsAtError = connectRoomMock.mock.calls.length;
     await vi.advanceTimersByTimeAsync(10000);
     expect(connectRoomMock.mock.calls.length).toBe(callsAtError);
+  });
+
+  it("enters the lobby after creating a room through the lazy peer module and stops its tick on leave", async () => {
+    vi.useFakeTimers();
+    const destroyed = vi.fn();
+    createPeerHolder.impl = () => ({
+      on: vi.fn(),
+      open: false,
+      id: "richman2-abcde",
+      destroy: destroyed,
+    });
+
+    useNetStore.getState().createRoom();
+    await vi.advanceTimersByTimeAsync(0);
+
+    const created = useNetStore.getState();
+    expect(created.status).toBe("lobby");
+    expect(created.roomCode).toBe("ABCDE");
+    expect(created.role).toBe("host");
+    expect(created.seats.length).toBe(created.lobbyConfig.playerCount);
+
+    useNetStore.getState().leave();
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(useNetStore.getState().status).toBe("idle");
+    expect(useNetStore.getState().role).toBeNull();
   });
 });
