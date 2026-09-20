@@ -16,28 +16,50 @@ import { asPlayerId } from "@/game/core/ids";
 export const STATE_VERSION = 2;
 
 export function hashContent(input: string): string {
-  let h = 2166136261;
+  let h1 = 2166136261;
+  let h2 = 2166136261 ^ 0x9e3779b9;
   for (let i = 0; i < input.length; i += 1) {
-    h ^= input.charCodeAt(i);
-    h = Math.imul(h, 16777619);
+    const code = input.charCodeAt(i);
+    h1 ^= code;
+    h1 = Math.imul(h1, 16777619);
+    h2 ^= code;
+    h2 = Math.imul(h2, 2246822519);
   }
-  return (h >>> 0).toString(16).padStart(8, "0");
+  return (
+    (h1 >>> 0).toString(16).padStart(8, "0") +
+    (h2 >>> 0).toString(16).padStart(8, "0")
+  );
+}
+
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value) ?? "null";
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => stableStringify(entry)).join(",")}]`;
+  }
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([, entry]) => entry !== undefined)
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return `{${entries
+    .map(([key, entry]) => `${JSON.stringify(key)}:${stableStringify(entry)}`)
+    .join(",")}}`;
 }
 
 export function computeContentHash(content: {
-  map: { id: string; tiles: unknown[] };
-  cards: Record<string, CardDef>;
+  map: unknown;
+  cards: Record<string, unknown>;
   items: Record<string, unknown>;
   characters: Record<string, unknown>;
 }): string {
-  const parts = [
-    content.map.id,
-    String(content.map.tiles.length),
-    ...Object.keys(content.cards).sort(),
-    ...Object.keys(content.items).sort(),
-    ...Object.keys(content.characters).sort(),
-  ];
-  return hashContent(parts.join("|"));
+  return hashContent(
+    stableStringify({
+      map: content.map,
+      cards: content.cards,
+      items: content.items,
+      characters: content.characters,
+    }),
+  );
 }
 
 function expandDeck(cards: Record<string, CardDef>, deck: DeckId): string[] {
@@ -133,6 +155,7 @@ export function createGameState(
     chanceDiscard: [],
     fateDiscard: [],
     pending: null,
+    debtQueue: [],
     queue: [],
     config: {
       targetRounds: setup.targetRounds,

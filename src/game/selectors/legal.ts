@@ -6,8 +6,12 @@ import type {
   TileDef,
 } from "../core/types";
 import { currentPlayer } from "../core/reducer";
-import { pendingTargetOptions } from "../systems/effects";
+import {
+  pendingTargetOptions,
+  targetOptionsForItem,
+} from "../systems/effects";
 import { discountedPrice } from "../systems/skills";
+import { maxLevelFor } from "../rules/rent";
 
 export { pendingTargetOptions };
 
@@ -89,6 +93,9 @@ export function getLegalActions(
   }
 
   for (const item of player.items) {
+    if (player.status !== "active") {
+      break;
+    }
     const def = content.items[item.defId];
     if (!def) {
       continue;
@@ -97,8 +104,8 @@ export function getLegalActions(
       actions.push({ type: "use-item", playerId, itemId: item.id });
       continue;
     }
-    const options = pendingTargetOptionsForUse(state, playerId, content, def.id);
-    if (options > 0) {
+    const options = targetOptionsForItem(state, content, playerId, def.id);
+    if (options.length > 0) {
       actions.push({ type: "use-item", playerId, itemId: item.id });
     }
   }
@@ -112,6 +119,9 @@ export function getLegalActions(
       effects.length > 0 &&
       effects.every((effect) => effect.kind === "get-out-of-jail");
     if (escapeOnly && player.status !== "jailed") {
+      continue;
+    }
+    if (!escapeOnly && player.status !== "active") {
       continue;
     }
     if ((player.skillCharges[skill.id] ?? 0) <= 0 && skill.charges !== undefined) {
@@ -145,7 +155,8 @@ export function getLegalActions(
         const base = def.upgradeCosts?.[tile.level] ?? 0;
         const cost = discountedPrice(state, content, playerId, base, "upgrade-discount");
         if (
-          tile.level < state.config.economy.maxBuildingLevel &&
+          tile.level <
+            Math.min(state.config.economy.maxBuildingLevel, maxLevelFor(def)) &&
           player.money >= cost
         ) {
           actions.push({ type: "upgrade-property", playerId, tileIndex: tile.index });
@@ -184,35 +195,4 @@ export function getLegalActions(
   }
 
   return actions;
-}
-
-function pendingTargetOptionsForUse(
-  state: GameState,
-  playerId: PlayerId,
-  content: GameContent,
-  itemDefId: string,
-): number {
-  const def = content.items[itemDefId];
-  if (!def) {
-    return 0;
-  }
-  if (def.target === "opponent") {
-    return state.players.filter(
-      (entry) => entry.id !== playerId && entry.status !== "bankrupt",
-    ).length;
-  }
-  if (def.target === "opponent-property") {
-    return state.tiles.filter(
-      (tile) =>
-        tile.ownerId !== null &&
-        tile.ownerId !== playerId &&
-        ["property", "transport", "utility"].includes(
-          (state.tileDefs[tile.index] as TileDef).kind,
-        ),
-    ).length;
-  }
-  if (def.target === "tile") {
-    return def.targetRange ?? state.tiles.length;
-  }
-  return 1;
 }

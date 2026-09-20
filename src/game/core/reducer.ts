@@ -15,6 +15,7 @@ import {
   addMoney,
   bankruptPlayer,
   findPlayer,
+  promoteDebt,
   settleDebtIfPossible,
 } from "../rules/money";
 import { movePlayer } from "../rules/movement";
@@ -27,7 +28,9 @@ import {
   resolveTargetPending,
   settlePhase,
 } from "../systems/resolution";
-import { addItem, removeItem } from "../rules/status";
+import { targetOptionsForItem } from "../systems/effects";
+import { addItem, MAX_ITEMS_PER_PLAYER, removeItem } from "../rules/status";
+import { maxLevelFor } from "../rules/rent";
 
 export function currentPlayer(state: GameState): Player {
   const player = state.players[state.turnSeat];
@@ -76,6 +79,7 @@ function finishGame(
   state.phase = "finished";
   state.queue = [];
   state.pending = null;
+  state.debtQueue = [];
   state.standings = standingsByNetWorth(state);
   state.winnerId = winnerId ?? state.standings[0] ?? null;
   const winner = state.winnerId ? findPlayer(state, state.winnerId) : null;
@@ -149,6 +153,7 @@ function advanceTurn(state: GameState, events: GameEvent[]): void {
     finishGame(state, events, null);
     return;
   }
+  promoteDebt(state, events);
   const next = currentPlayer(state);
   tickCooldowns(state, next.id);
   next.lotteryBoughtThisTurn = false;
@@ -478,7 +483,10 @@ function handleUpgrade(
   if (tile.mortgaged) {
     throw new EngineError("INVALID_TARGET", "Mortgaged property cannot be upgraded");
   }
-  const maxLevel = state.config.economy.maxBuildingLevel;
+  const maxLevel = Math.min(
+    state.config.economy.maxBuildingLevel,
+    maxLevelFor(def),
+  );
   if (tile.level >= maxLevel) {
     throw new EngineError("INVALID_TARGET", "Property is fully built");
   }
@@ -652,6 +660,9 @@ function handleBuyItem(
   if (player.money < def.price) {
     throw new EngineError("INSUFFICIENT_FUNDS", "Cannot afford this item");
   }
+  if (player.items.length >= MAX_ITEMS_PER_PLAYER) {
+    throw new EngineError("INVALID_ACTION", "Item bag is full");
+  }
   addMoney(state, events, playerId, -def.price, "item");
   addItem(state, events, playerId, def.id);
   events.push({ type: "item-bought", playerId, itemDefId: def.id, price: def.price });
@@ -679,12 +690,22 @@ function handleUseItem(
     throw new EngineError("NOT_YOUR_TURN", "Not your turn");
   }
   const player = findPlayer(state, playerId);
+  if (player.status !== "active") {
+    throw new EngineError(
+      "INVALID_ACTION",
+      "Cannot use items while in jail or hospital",
+    );
+  }
   const item = player.items.find((entry) => entry.id === itemId);
   const def = item ? content.items[item.defId] : undefined;
   if (!item || !def) {
     throw new EngineError("INVALID_TARGET", "Item not found");
   }
   if (def.target !== "none" && def.target !== "self") {
+    const options = targetOptionsForItem(state, content, playerId, def.id);
+    if (options.length === 0) {
+      throw new EngineError("INVALID_TARGET", "No valid target for this item");
+    }
     state.pending = {
       kind: "item-target",
       playerId,
@@ -756,6 +777,12 @@ function handleUseSkill(
       icon: skill.icon ?? "🩺",
     });
   } else {
+    if (player.status !== "active") {
+      throw new EngineError(
+        "INVALID_ACTION",
+        "Cannot use skills while in jail or hospital",
+      );
+    }
     pushEffects(state, playerId, effects, "skill", skill.id);
   }
   if (skill.charges !== undefined) {
@@ -905,6 +932,10 @@ function handleDeclareBankrupt(
     throw new EngineError("INVALID_ACTION", "Already bankrupt");
   }
   const pending = state.pending;
+  const isCurrent = currentPlayer(state).id === playerId;
+  if (!isCurrent && pending?.playerId !== playerId) {
+    throw new EngineError("NOT_YOUR_TURN", "Not your decision");
+  }
   const creditorId = pending?.kind === "raise-funds" ? pending.creditorId : null;
   bankruptPlayer(state, events, playerId, creditorId);
   if (pending?.playerId === playerId) {
@@ -913,7 +944,7 @@ function handleDeclareBankrupt(
   if (checkBankruptcyOutcome(state, events)) {
     return;
   }
-  if (currentPlayer(state).id === playerId) {
+  if (isCurrent) {
     advanceTurn(state, events);
     return;
   }

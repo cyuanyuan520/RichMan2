@@ -7,7 +7,6 @@ import type {
   ItemTargetOption,
   PlayerId,
   ResolutionTask,
-  TargetedEffectKind,
   TileDef,
 } from "../core/types";
 import { EngineError } from "../core/errors";
@@ -23,20 +22,6 @@ import { mitigationFactor } from "./skills";
 import { rngInt } from "../core/rng";
 
 export type EffectsTask = Extract<ResolutionTask, { kind: "effects" }>;
-
-const TARGETED: Record<string, TargetedEffectKind> = {
-  "swap-position": "swap-position",
-  teleport: "teleport",
-  "place-roadblock": "place-roadblock",
-  demolish: "demolish",
-  "skip-turn": "skip-turn",
-  audit: "audit",
-  "force-buy": "force-buy",
-};
-
-export function targetedKindOf(effect: CardEffect): TargetedEffectKind | null {
-  return TARGETED[effect.kind] ?? null;
-}
 
 export function targetKindOf(effect: CardEffect): ItemTargetKind | null {
   switch (effect.kind) {
@@ -120,6 +105,50 @@ export function targetOptions(
   }
 }
 
+export function targetOptionsForItem(
+  state: GameState,
+  content: GameContent,
+  playerId: PlayerId,
+  itemDefId: string,
+): ItemTargetOption[] {
+  const def = content.items[itemDefId];
+  if (!def) {
+    return [];
+  }
+  const options = targetOptions(state, playerId, def.target, def.targetRange);
+  if (def.target !== "opponent-property") {
+    return options;
+  }
+  const player = findPlayer(state, playerId);
+  const forceBuy = def.effects.find((effect) => effect.kind === "force-buy");
+  const demolish = def.effects.some((effect) => effect.kind === "demolish");
+  return options.filter((option) => {
+    if (option.tileIndex === undefined) {
+      return true;
+    }
+    const tile = state.tiles[option.tileIndex];
+    const tileDef = state.tileDefs[option.tileIndex] as TileDef;
+    if (!tile || !tileDef || tile.ownerId === null) {
+      return false;
+    }
+    if (demolish && tile.level <= 0) {
+      return false;
+    }
+    if (forceBuy) {
+      const invested = (tileDef.upgradeCosts ?? [])
+        .slice(0, tile.level)
+        .reduce((sum, entry) => sum + entry, 0);
+      const cost = Math.round(
+        ((tileDef.price ?? 0) + invested) * forceBuy.multiplier,
+      );
+      if (player.money < cost) {
+        return false;
+      }
+    }
+    return true;
+  });
+}
+
 export function pendingTargetOptions(
   state: GameState,
   content: GameContent,
@@ -136,7 +165,7 @@ export function pendingTargetOptions(
     if (!def) {
       return [];
     }
-    return targetOptions(state, pending.playerId, def.target, def.targetRange);
+    return targetOptionsForItem(state, content, pending.playerId, def.id);
   }
   if (pending.kind === "card-target") {
     const task = state.queue[0];
@@ -276,10 +305,13 @@ export function applyEffect(
       return;
     }
     case "move-to": {
+      const landingDice = state.lastRoll
+        ? state.lastRoll[0] + state.lastRoll[1]
+        : 7;
       switch (effect.destination) {
         case "start": {
           moveToTile(state, events, content, playerId, 0);
-          state.queue.push({ kind: "landing", playerId, diceSum: 0 });
+          state.queue.push({ kind: "landing", playerId, diceSum: landingDice });
           return;
         }
         case "jail":
@@ -292,7 +324,7 @@ export function applyEffect(
           const index = findTileIndex(state, "shop");
           if (index >= 0) {
             moveToTile(state, events, content, playerId, index);
-            state.queue.push({ kind: "landing", playerId, diceSum: 0 });
+            state.queue.push({ kind: "landing", playerId, diceSum: landingDice });
           }
           return;
         }
@@ -300,7 +332,7 @@ export function applyEffect(
           const index = findTileIndex(state, "lottery");
           if (index >= 0) {
             moveToTile(state, events, content, playerId, index);
-            state.queue.push({ kind: "landing", playerId, diceSum: 0 });
+            state.queue.push({ kind: "landing", playerId, diceSum: landingDice });
           }
           return;
         }
@@ -308,7 +340,7 @@ export function applyEffect(
           const index = nearestTileIndex(state, player.position, "transport");
           if (index >= 0) {
             moveToTile(state, events, content, playerId, index);
-            state.queue.push({ kind: "landing", playerId, diceSum: 0 });
+            state.queue.push({ kind: "landing", playerId, diceSum: landingDice });
           }
           return;
         }
@@ -321,7 +353,7 @@ export function applyEffect(
             state.rng = rng;
             const chosen = propertyTiles[pick]!;
             moveToTile(state, events, content, playerId, chosen.index);
-            state.queue.push({ kind: "landing", playerId, diceSum: 0 });
+            state.queue.push({ kind: "landing", playerId, diceSum: landingDice });
           }
           return;
         }
@@ -330,7 +362,11 @@ export function applyEffect(
     }
     case "move-steps": {
       movePlayer(state, events, content, playerId, effect.steps);
-      state.queue.push({ kind: "landing", playerId, diceSum: 0 });
+      state.queue.push({
+        kind: "landing",
+        playerId,
+        diceSum: Math.abs(effect.steps),
+      });
       return;
     }
     case "jail":
@@ -349,12 +385,14 @@ export function applyEffect(
       return;
     }
     case "gain-item": {
-      addItem(state, events, playerId, effect.itemDefId);
       const def = content.items[effect.itemDefId];
+      const gained = addItem(state, events, playerId, effect.itemDefId);
       events.push({
         type: "log",
-        text: `${player.name} 获得了 ${def?.name ?? effect.itemDefId}`,
-        icon: def?.icon ?? "🎁",
+        text: gained
+          ? `${player.name} 获得了 ${def?.name ?? effect.itemDefId}`
+          : `${player.name} 的道具背包已满，${def?.name ?? effect.itemDefId} 失效`,
+        icon: gained ? (def?.icon ?? "🎁") : "🎒",
       });
       return;
     }
@@ -447,7 +485,12 @@ export function applyEffect(
         return;
       }
       const ownerId = tile.ownerId;
-      const cost = Math.round((def.price ?? 0) * effect.multiplier);
+      const invested = (def.upgradeCosts ?? [])
+        .slice(0, tile.level)
+        .reduce((sum, entry) => sum + entry, 0);
+      const cost = Math.round(
+        ((def.price ?? 0) + invested) * effect.multiplier,
+      );
       if (player.money < cost) {
         events.push({
           type: "log",

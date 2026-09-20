@@ -79,9 +79,9 @@ src/
 - 卡牌/道具效果使用声明式 DSL（`CardEffect` 联合类型，23 种），引擎
   `systems/effects.ts` 解释执行，落地格行为由 `rules/landing.ts` 的
   `TILE_HANDLERS` 注册表按 `TileKind` 分派；新增卡牌/道具/角色无需改逻辑。
-- `validateContent()` / `assertMapStructure()` 在启动（生产环境构建期）与测试中
-  对全部内容做 zod 校验与结构断言（40 格、类型计数、组引用、租金表长度、
-  id 唯一性、道具引用完整性）。
+- `validateContent()` / `assertMapStructure()` 在开发启动与测试中对全部内容做
+  zod 校验与结构断言（40 格、类型计数、组引用、租金表长度、id 唯一性、
+  道具引用完整性）；生产构建不重复执行（测试是内容质量的把关点）。
 - `buildGameContent(mapId)` 组装注册表并计算 `contentHash`，供引擎与联机校验使用。
 
 ## 联机模型（P3 实施）

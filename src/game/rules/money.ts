@@ -4,6 +4,7 @@ import type {
   MoneyReason,
   Player,
   PlayerId,
+  RaiseFundsDecision,
   TileDef,
 } from "../core/types";
 import { EngineError } from "../core/errors";
@@ -34,22 +35,6 @@ export function addMoney(
   });
 }
 
-export function transferMoney(
-  state: GameState,
-  events: GameEvent[],
-  fromId: PlayerId,
-  toId: PlayerId,
-  amount: number,
-  reason: MoneyReason,
-): void {
-  addMoney(state, events, fromId, -amount, reason);
-  const target = findPlayer(state, toId);
-  if (target.status === "bankrupt") {
-    return;
-  }
-  addMoney(state, events, toId, amount, reason);
-}
-
 export function liquidateValue(state: GameState, playerId: PlayerId): number {
   const economy = state.config.economy;
   let total = 0;
@@ -78,20 +63,28 @@ export function bankruptPlayer(
   if (player.status === "bankrupt") {
     return;
   }
+  const balance = player.money;
+  if (balance !== 0) {
+    addMoney(state, events, playerId, -balance, "bankruptcy");
+  }
   const creditor =
-    creditorId && creditorId !== playerId
+    balance > 0 && creditorId && creditorId !== playerId
       ? state.players.find(
           (entry) => entry.id === creditorId && entry.status !== "bankrupt",
         )
       : undefined;
-  if (player.money > 0 && creditor) {
-    addMoney(state, events, creditor.id, player.money, "bankruptcy");
+  if (creditor && balance > 0) {
+    addMoney(state, events, creditor.id, balance, "bankruptcy");
   }
   player.status = "bankrupt";
   player.money = 0;
   player.statusTurns = 0;
   player.items = [];
   player.skipTurns = 0;
+  state.debtQueue = state.debtQueue.filter((debt) => debt.playerId !== playerId);
+  if (state.pending?.kind === "raise-funds" && state.pending.playerId === playerId) {
+    state.pending = null;
+  }
   for (const tile of state.tiles) {
     if (tile.ownerId === playerId) {
       tile.ownerId = null;
@@ -103,15 +96,63 @@ export function bankruptPlayer(
     }
   }
   player.properties = [];
-  events.push({
-    type: "money-changed",
-    playerId,
-    delta: -player.money,
-    reason: "bankruptcy",
-    balance: 0,
-  });
   events.push({ type: "player-bankrupt", playerId, creditorId });
   events.push({ type: "log", text: `${player.name} 破产离场`, icon: "💥" });
+}
+
+export function promoteDebt(state: GameState, events: GameEvent[]): void {
+  if (state.pending) {
+    return;
+  }
+  while (!state.pending && state.debtQueue.length > 0) {
+    const debt = state.debtQueue.shift() as RaiseFundsDecision;
+    const player = state.players.find((entry) => entry.id === debt.playerId);
+    if (!player || player.status === "bankrupt") {
+      continue;
+    }
+    state.pending = debt;
+    events.push({ type: "decision-requested", decision: debt });
+    events.push({
+      type: "log",
+      text: `${player.name} 欠款 ${debt.amount} 元，需要变卖资产或抵押地产`,
+      icon: "🏚️",
+    });
+  }
+}
+
+function queueDebt(
+  state: GameState,
+  events: GameEvent[],
+  playerId: PlayerId,
+  creditorId: PlayerId | null,
+  reason: MoneyReason,
+): void {
+  const player = findPlayer(state, playerId);
+  const amount = -player.money;
+  if (state.pending?.kind === "raise-funds" && state.pending.playerId === playerId) {
+    state.pending.amount = amount;
+    state.pending.creditorId = state.pending.creditorId ?? creditorId;
+    return;
+  }
+  const existing = state.debtQueue.find((debt) => debt.playerId === playerId);
+  if (existing) {
+    existing.amount = amount;
+    existing.creditorId = existing.creditorId ?? creditorId;
+    return;
+  }
+  state.debtQueue.push({
+    kind: "raise-funds",
+    playerId,
+    creditorId,
+    amount,
+    reason,
+  });
+  events.push({
+    type: "log",
+    text: `${player.name} 欠款 ${amount} 元，等待处理`,
+    icon: "🏚️",
+  });
+  promoteDebt(state, events);
 }
 
 export function payMoney(
@@ -129,14 +170,23 @@ export function payMoney(
   if (player.status === "bankrupt") {
     return false;
   }
-  if (creditorId && creditorId !== playerId) {
-    transferMoney(state, events, playerId, creditorId, amount, reason);
-  } else {
-    addMoney(state, events, playerId, -amount, reason);
+  const paidNow = Math.min(amount, Math.max(0, player.money));
+  if (paidNow > 0) {
+    addMoney(state, events, playerId, -paidNow, reason);
+    if (creditorId && creditorId !== playerId) {
+      const creditor = state.players.find(
+        (entry) => entry.id === creditorId && entry.status !== "bankrupt",
+      );
+      if (creditor) {
+        addMoney(state, events, creditor.id, paidNow, reason);
+      }
+    }
   }
-  if (player.money >= 0) {
+  const deficit = amount - paidNow;
+  if (deficit <= 0) {
     return true;
   }
+  addMoney(state, events, playerId, -deficit, reason);
   return requestFunds(state, events, playerId, creditorId, reason);
 }
 
@@ -148,33 +198,15 @@ function requestFunds(
   reason: MoneyReason,
 ): boolean {
   const player = findPlayer(state, playerId);
-  const deficit = -player.money;
   if (player.money + liquidateValue(state, playerId) < 0) {
+    if (state.pending?.kind === "raise-funds" && state.pending.playerId === playerId) {
+      state.pending = null;
+    }
     bankruptPlayer(state, events, playerId, creditorId);
+    promoteDebt(state, events);
     return false;
   }
-  const existing = state.pending;
-  if (existing && existing.kind === "raise-funds" && existing.playerId === playerId) {
-    existing.amount = deficit;
-    return false;
-  }
-  if (existing) {
-    bankruptPlayer(state, events, playerId, creditorId);
-    return false;
-  }
-  state.pending = {
-    kind: "raise-funds",
-    playerId,
-    creditorId,
-    amount: deficit,
-    reason,
-  };
-  events.push({ type: "decision-requested", decision: state.pending });
-  events.push({
-    type: "log",
-    text: `${player.name} 欠款 ${deficit} 元，需要变卖资产或抵押地产`,
-    icon: "🏚️",
-  });
+  queueDebt(state, events, playerId, creditorId, reason);
   return false;
 }
 
@@ -189,9 +221,21 @@ export function settleDebtIfPossible(
   const player = findPlayer(state, pending.playerId);
   if (player.status === "bankrupt") {
     state.pending = null;
+    promoteDebt(state, events);
     return true;
   }
   if (player.money >= 0) {
+    const outstanding = pending.amount;
+    const creditor =
+      outstanding > 0 && pending.creditorId && pending.creditorId !== player.id
+        ? state.players.find(
+            (entry) =>
+              entry.id === pending.creditorId && entry.status !== "bankrupt",
+          )
+        : undefined;
+    if (creditor) {
+      addMoney(state, events, creditor.id, outstanding, pending.reason);
+    }
     events.push({
       type: "log",
       text: `${player.name} 变卖资产后还清了欠款`,
@@ -203,11 +247,13 @@ export function settleDebtIfPossible(
       playerId: player.id,
     });
     state.pending = null;
+    promoteDebt(state, events);
     return true;
   }
   if (player.money + liquidateValue(state, player.id) < 0) {
     bankruptPlayer(state, events, player.id, pending.creditorId);
     state.pending = null;
+    promoteDebt(state, events);
     return true;
   }
   return false;

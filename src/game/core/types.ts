@@ -297,6 +297,8 @@ export type PendingDecision =
       playerId: PlayerId;
     };
 
+export type RaiseFundsDecision = Extract<PendingDecision, { kind: "raise-funds" }>;
+
 export interface ItemTargetOption {
   kind: "player" | "tile";
   playerId?: PlayerId;
@@ -448,6 +450,7 @@ export interface GameState {
   chanceDiscard: string[];
   fateDiscard: string[];
   pending: PendingDecision | null;
+  debtQueue: RaiseFundsDecision[];
   queue: ResolutionTask[];
   config: {
     targetRounds: number;

@@ -45,6 +45,12 @@ export function countOwnedByKind(
   }).length;
 }
 
+export function maxLevelFor(def: TileDef): number {
+  const costLevels = def.upgradeCosts?.length ?? 0;
+  const rentLevels = (def.rents?.length ?? 1) - 1;
+  return Math.max(0, Math.min(costLevels, rentLevels));
+}
+
 export function rentForTile(
   state: GameState,
   content: GameContent,
@@ -63,7 +69,9 @@ export function rentForTile(
       : 1;
   switch (def.kind) {
     case "property": {
-      const base = def.rents?.[tile.level] ?? 0;
+      const rents = def.rents ?? [];
+      const level = Math.min(tile.level, Math.max(0, rents.length - 1));
+      const base = rents[level] ?? rents[rents.length - 1] ?? 0;
       const bonus =
         def.group && hasGroupMonopoly(state, tile.ownerId, def.group)
           ? state.config.economy.groupMonopolyRentBonus
@@ -72,7 +80,9 @@ export function rentForTile(
     }
     case "transport": {
       const count = countOwnedByKind(state, tile.ownerId, "transport");
-      const base = state.config.economy.transportRents[count - 1] ?? 0;
+      const rents = state.config.economy.transportRents;
+      const index = Math.min(Math.max(1, count), rents.length) - 1;
+      const base = rents[index] ?? rents[rents.length - 1] ?? 0;
       return Math.round(base * factors);
     }
     case "utility": {

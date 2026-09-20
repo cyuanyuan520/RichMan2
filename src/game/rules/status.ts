@@ -83,15 +83,17 @@ export function findTileIndex(state: GameState, kind: string, occurrence = 0): n
   return -1;
 }
 
+export const MAX_ITEMS_PER_PLAYER = 4;
+
 export function addItem(
   state: GameState,
   events: GameEvent[],
   playerId: PlayerId,
   itemDefId: string,
-): void {
+): boolean {
   const player = findPlayer(state, playerId);
-  if (player.status === "bankrupt") {
-    return;
+  if (player.status === "bankrupt" || player.items.length >= MAX_ITEMS_PER_PLAYER) {
+    return false;
   }
   state.itemSeq += 1;
   player.items.push({
@@ -99,6 +101,7 @@ export function addItem(
     defId: itemDefId,
   });
   events.push({ type: "item-gained", playerId, itemDefId });
+  return true;
 }
 
 export function removeItem(

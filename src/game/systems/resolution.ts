@@ -9,7 +9,7 @@ import type {
   ResolutionTask,
 } from "../core/types";
 import { EngineError } from "../core/errors";
-import { findPlayer } from "../rules/money";
+import { findPlayer, promoteDebt } from "../rules/money";
 import { resolveLanding } from "../rules/landing";
 import { removeItem } from "../rules/status";
 import { applyEffect, pendingTargetOptions, targetKindOf, type EffectsTask } from "./effects";
@@ -39,6 +39,7 @@ export function pump(
   content: GameContent,
 ): void {
   let guard = 0;
+  promoteDebt(state, events);
   while (state.queue.length > 0 && !state.pending) {
     guard += 1;
     if (guard > 1000) {
@@ -79,6 +80,10 @@ function applyEffectsTask(
     applyEffect(state, events, content, task, effect);
     task.index += 1;
     task.target = null;
+    if (findPlayer(state, task.playerId).status === "bankrupt") {
+      state.queue.shift();
+      return;
+    }
     if (state.pending) {
       return;
     }

@@ -87,7 +87,7 @@ function handleRaiseFunds(
   state: GameState,
   playerId: PlayerId,
   actions: GameAction[],
-): GameAction {
+): GameAction | null {
   const player = findPlayer(state, playerId);
   if (player.money >= 0) {
     const done = pickAction(actions, "raise-funds-done");
@@ -125,7 +125,7 @@ function handleRaiseFunds(
   if (bankrupt) {
     return bankrupt;
   }
-  return actions[0] as GameAction;
+  return (actions[0] as GameAction | undefined) ?? null;
 }
 
 function handleTarget(
@@ -133,14 +133,14 @@ function handleTarget(
   playerId: PlayerId,
   actions: GameAction[],
   difficulty: BotDifficulty,
-): GameAction {
+): GameAction | null {
   const resolves = actions.filter(
     (action): action is Extract<GameAction, { type: "resolve-target" }> =>
       action.type === "resolve-target",
   );
   const cancel = pickAction(actions, "cancel-target");
   if (resolves.length === 0) {
-    return cancel ?? (actions[0] as GameAction);
+    return cancel ?? null;
   }
   const resolve = pick(state, resolves);
   if (difficulty === "hard") {
@@ -167,12 +167,49 @@ function handleTarget(
   return resolve;
 }
 
+function tryUseItem(
+  state: GameState,
+  content: GameContent,
+  playerId: PlayerId,
+  actions: GameAction[],
+  difficulty: BotDifficulty,
+): GameAction | null {
+  const chance =
+    difficulty === "hard" ? 0.6 : difficulty === "normal" ? 0.35 : 0.15;
+  if (roll0100(state) >= chance) {
+    return null;
+  }
+  const player = findPlayer(state, playerId);
+  const candidates = actions
+    .filter(
+      (action): action is Extract<GameAction, { type: "use-item" }> =>
+        action.type === "use-item",
+    )
+    .map((action) => {
+      const item = player.items.find((entry) => entry.id === action.itemId);
+      const def = item ? content.items[item.defId] : undefined;
+      return { action, def };
+    })
+    .filter((entry) => entry.def !== undefined);
+  const worthwhile = candidates.filter((entry) =>
+    (entry.def?.effects ?? []).some((effect) =>
+      ["halt", "audit", "share-wealth", "force-buy", "demolish"].includes(
+        effect.kind,
+      ),
+    ),
+  );
+  if (worthwhile.length === 0) {
+    return null;
+  }
+  return pick(state, worthwhile).action;
+}
+
 function handleActionWindow(
   state: GameState,
   content: GameContent,
   playerId: PlayerId,
   actions: GameAction[],
-): GameAction {
+): GameAction | null {
   const player = findPlayer(state, playerId);
   const difficulty = player.botDifficulty;
   const buffer = bufferFor(difficulty);
@@ -225,11 +262,16 @@ function handleActionWindow(
     return lottery;
   }
 
+  const item = tryUseItem(state, content, playerId, actions, difficulty);
+  if (item) {
+    return item;
+  }
+
   const endTurn = pickAction(actions, "end-turn");
   if (endTurn) {
     return endTurn;
   }
-  return actions[0] as GameAction;
+  return null;
 }
 
 export function chooseAiAction(
@@ -246,6 +288,9 @@ export function chooseAiAction(
     return null;
   }
   const pending = state.pending;
+  if (pending && pending.playerId !== playerId) {
+    return null;
+  }
   if (pending && pending.playerId === playerId) {
     switch (pending.kind) {
       case "buy-property":
@@ -261,10 +306,10 @@ export function chooseAiAction(
             action.type === "choose-dice",
         );
         const value = pick(state, values);
-        return value ?? (actions[0] as GameAction);
+        return value ?? null;
       }
       default:
-        return actions[0] as GameAction;
+        return null;
     }
   }
 
@@ -282,6 +327,10 @@ export function chooseAiAction(
       if (roll0100(state) < chance) {
         return skill;
       }
+    }
+    const item = tryUseItem(state, content, playerId, actions, player.botDifficulty);
+    if (item) {
+      return item;
     }
     const roll = pickAction(actions, "roll-dice");
     if (roll) {

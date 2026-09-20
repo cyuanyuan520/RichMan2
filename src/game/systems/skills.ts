@@ -141,13 +141,3 @@ export function canUseActiveSkill(
   }
   return true;
 }
-
-export function tickSkillCooldowns(state: GameState, playerId: PlayerId): void {
-  const player = findPlayer(state, playerId);
-  for (const key of Object.keys(player.skillCooldowns)) {
-    player.skillCooldowns[key] = Math.max(
-      0,
-      (player.skillCooldowns[key] ?? 0) - 1,
-    );
-  }
-}
