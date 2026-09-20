@@ -1,4 +1,5 @@
 import type {
+  GameContent,
   GameState,
   Player,
   PlayerId,
@@ -13,6 +14,7 @@ import {
 } from "../core/reducer";
 import { findPlayer } from "../rules/money";
 import { rentForTile } from "../rules/rent";
+import { discountedPrice } from "../systems/skills";
 
 export {
   activePlayers,
@@ -23,12 +25,15 @@ export {
   rentForTile,
 };
 
+export { getLegalActions, pendingTargetOptions } from "./legal";
+
 export function playerOnSeat(state: GameState, seat: number): Player | null {
   return state.players[seat] ?? null;
 }
 
 export function canBuyTile(
   state: GameState,
+  content: GameContent,
   playerId: PlayerId,
   tileIndex: number,
 ): boolean {
@@ -41,11 +46,13 @@ export function canBuyTile(
     return false;
   }
   const player = findPlayer(state, playerId);
-  return player.money >= (def.price ?? 0);
+  const price = discountedPrice(state, content, playerId, def.price ?? 0, "buy-discount");
+  return player.money >= price;
 }
 
 export function canUpgradeTile(
   state: GameState,
+  content: GameContent,
   playerId: PlayerId,
   tileIndex: number,
 ): boolean {
@@ -61,12 +68,15 @@ export function canUpgradeTile(
     return false;
   }
   const player = findPlayer(state, playerId);
-  const cost = def.upgradeCosts?.[tile.level] ?? 0;
+  const base = def.upgradeCosts?.[tile.level] ?? 0;
+  const cost = discountedPrice(state, content, playerId, base, "upgrade-discount");
   return player.money >= cost;
 }
 
 export function upgradeCostOf(
   state: GameState,
+  content: GameContent,
+  playerId: PlayerId,
   tileIndex: number,
 ): number {
   const tile = state.tiles[tileIndex];
@@ -74,7 +84,13 @@ export function upgradeCostOf(
   if (!tile || !def) {
     return 0;
   }
-  return def.upgradeCosts?.[tile.level] ?? 0;
+  return discountedPrice(
+    state,
+    content,
+    playerId,
+    def.upgradeCosts?.[tile.level] ?? 0,
+    "upgrade-discount",
+  );
 }
 
 export function ownedTilesOf(state: GameState, playerId: PlayerId): TileState[] {

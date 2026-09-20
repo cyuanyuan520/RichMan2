@@ -4,8 +4,11 @@ import { characters, items } from "@/data/content";
 import { chanceCards, fateCards } from "@/data/content/cards";
 import { validateContent } from "@/data/content";
 
-export default function HomePage() {
+if (process.env.NODE_ENV !== "production") {
   validateContent();
+}
+
+export default function HomePage() {
   const stats = [
     { label: "地图", value: maps.length },
     { label: "格子", value: maps[0]?.tiles.length ?? 0 },

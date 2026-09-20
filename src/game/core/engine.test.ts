@@ -1,78 +1,28 @@
 import { describe, expect, it } from "vitest";
-import type { EconomyConfig, GameState } from "./types";
 import { EngineError } from "./errors";
-import { asPlayerId } from "./ids";
-import { createGameState, type GameContent } from "./state";
-import { reduce } from "./reducer";
-import { inkMap } from "@/data/maps/ink";
 import { defaultEconomy } from "@/data/content/economy";
-import { chanceCards, fateCards } from "@/data/content/cards";
-import { characterDefs } from "@/data/content/characters";
-
-const P1 = asPlayerId("p1");
-const P2 = asPlayerId("p2");
-
-const content: GameContent = {
-  map: inkMap,
-  chanceDeck: chanceCards.map((card) => card.id),
-  fateDeck: fateCards.map((card) => card.id),
-};
-
-function makeGame(options?: {
-  playerCount?: number;
-  economy?: Partial<EconomyConfig>;
-  seed?: number;
-  targetRounds?: number;
-}): GameState {
-  const playerCount = options?.playerCount ?? 2;
-  const economy = { ...defaultEconomy, ...options?.economy };
-  return createGameState(
-    {
-      mapId: inkMap.id,
-      players: Array.from({ length: playerCount }, (_, index) => ({
-        name: `玩家${index + 1}`,
-        characterId: characterDefs[index]!.id,
-        tokenId: `token-${index}`,
-        isBot: false,
-      })),
-      seed: options?.seed ?? 42,
-      targetRounds: options?.targetRounds ?? 0,
-      economy,
-    },
-    content,
-  );
-}
-
-function roll(
-  state: GameState,
-  dice: [number, number],
-): { state: GameState; events: ReturnType<typeof reduce>["events"] } {
-  const result = reduce(state, {
-    type: "roll-dice",
-    playerId: state.players[state.turnSeat]!.id,
-    forcedDice: dice,
-  });
-  return result;
-}
-
-function passTurn(state: GameState): GameState {
-  const playerId = state.players[state.turnSeat]!.id;
-  let next = state;
-  if (next.pending?.kind === "buy-property") {
-    next = reduce(next, { type: "decline-buy", playerId }).state;
-  }
-  return reduce(next, { type: "end-turn", playerId }).state;
-}
+import { netWorth } from "./reducer";
+import {
+  P1,
+  P2,
+  act,
+  content,
+  makeGame,
+  passTurn,
+  roll,
+} from "../test-utils";
 
 describe("engine core loop", () => {
-  it("creates an initial state", () => {
+  it("creates an initial state with content hash and empty queue", () => {
     const state = makeGame();
     expect(state.players).toHaveLength(2);
     expect(state.tiles).toHaveLength(40);
     expect(state.phase).toBe("await-roll");
     expect(state.players[0]!.money).toBe(defaultEconomy.startingMoney);
     expect(state.players.every((player) => player.position === 0)).toBe(true);
-    expect(state.chanceDeck).toHaveLength(chanceCards.length);
+    expect(state.chanceDeck).toHaveLength(12);
+    expect(state.contentHash).toBe(content.contentHash);
+    expect(state.queue).toEqual([]);
   });
 
   it("moves the player and requests a purchase decision", () => {
@@ -87,26 +37,23 @@ describe("engine core loop", () => {
   });
 
   it("buys a property and deducts money", () => {
-    const state = makeGame();
-    const rolled = roll(state, [1, 2]);
-    const next = reduce(rolled.state, {
+    const rolled = roll(makeGame(), [1, 2]);
+    const next = act(rolled.state, {
       type: "buy-property",
-      playerId: rolled.state.players[0]!.id,
+      playerId: P1,
     }).state;
     const tile = next.tiles[3]!;
     expect(tile.ownerId).toBe(P1);
-    expect(next.players[0]!.money).toBe(defaultEconomy.startingMoney - 650);
+    expect(next.players[0]!.money).toBe(
+      defaultEconomy.startingMoney - 650,
+    );
     expect(next.phase).toBe("action-window");
     expect(next.pending).toBeNull();
   });
 
   it("declines a purchase", () => {
-    const state = makeGame();
-    const rolled = roll(state, [1, 2]);
-    const next = reduce(rolled.state, {
-      type: "decline-buy",
-      playerId: rolled.state.players[0]!.id,
-    }).state;
+    const rolled = roll(makeGame(), [1, 2]);
+    const next = act(rolled.state, { type: "decline-buy", playerId: P1 }).state;
     expect(next.tiles[3]!.ownerId).toBeNull();
     expect(next.phase).toBe("action-window");
   });
@@ -114,8 +61,8 @@ describe("engine core loop", () => {
   it("pays rent to the owner", () => {
     let state = makeGame();
     state = roll(state, [1, 2]).state;
-    state = reduce(state, { type: "buy-property", playerId: P1 }).state;
-    state = reduce(state, { type: "end-turn", playerId: P1 }).state;
+    state = act(state, { type: "buy-property", playerId: P1 }).state;
+    state = act(state, { type: "end-turn", playerId: P1 }).state;
     expect(state.turnSeat).toBe(1);
     const def = state.tileDefs[3]!;
     const expectedRent = def.rents![0]!;
@@ -130,7 +77,7 @@ describe("engine core loop", () => {
   });
 
   it("pays salary and start bonus when passing start", () => {
-    const state = makeGame();
+    const state = makeGame({ characters: ["xue-ba", "xue-ba"] });
     state.players[0]!.position = 38;
     const { state: next, events } = roll(state, [1, 1]);
     expect(next.players[0]!.position).toBe(0);
@@ -157,50 +104,50 @@ describe("engine core loop", () => {
   });
 
   it("counts down jail turns and releases the player", () => {
-    let state = makeGame();
+    const state = makeGame();
     state.players[0]!.status = "jailed";
     state.players[0]!.statusTurns = 2;
     state.players[0]!.position = 10;
 
-    state = roll(state, [2, 3]).state;
-    expect(state.players[0]!.status).toBe("jailed");
-    expect(state.players[0]!.statusTurns).toBe(1);
-    expect(state.turnSeat).toBe(1);
+    const first = roll(state, [2, 3]).state;
+    expect(first.players[0]!.status).toBe("jailed");
+    expect(first.players[0]!.statusTurns).toBe(1);
+    expect(first.turnSeat).toBe(1);
 
-    state = passTurn(roll(state, [2, 3]).state);
-    expect(state.turnSeat).toBe(0);
+    const second = passTurn(roll(first, [2, 3]).state);
+    expect(second.turnSeat).toBe(0);
 
-    state = roll(state, [2, 3]).state;
-    expect(state.players[0]!.status).toBe("active");
-    expect(state.turnSeat).toBe(1);
+    const third = roll(second, [2, 3]).state;
+    expect(third.players[0]!.status).toBe("active");
+    expect(third.turnSeat).toBe(1);
   });
 
   it("lets a jailed player pay bail", () => {
-    let state = makeGame();
+    const state = makeGame();
     state.players[0]!.status = "jailed";
     state.players[0]!.statusTurns = 2;
     state.players[0]!.position = 10;
-    state = reduce(state, { type: "pay-jail-fine", playerId: P1 }).state;
-    expect(state.players[0]!.status).toBe("active");
-    expect(state.players[0]!.money).toBe(
+    const next = act(state, { type: "pay-jail-fine", playerId: P1 }).state;
+    expect(next.players[0]!.status).toBe("active");
+    expect(next.players[0]!.money).toBe(
       defaultEconomy.startingMoney - defaultEconomy.jailFine,
     );
-    expect(state.phase).toBe("await-roll");
+    expect(next.phase).toBe("await-roll");
   });
 
   it("ends the game when a player goes bankrupt", () => {
-    let state = makeGame({
-      economy: { transportRents: [0, 50000, 50000, 50000, 50000] },
+    const state = makeGame({
+      economy: { transportRents: [50000, 50000, 50000, 50000] },
     });
-    state = roll(state, [2, 3]).state;
-    expect(state.pending?.kind).toBe("buy-property");
-    state = reduce(state, { type: "buy-property", playerId: P1 }).state;
-    state = reduce(state, { type: "end-turn", playerId: P1 }).state;
-    const result = roll(state, [2, 3]);
-    state = result.state;
-    expect(state.players[1]!.status).toBe("bankrupt");
-    expect(state.phase).toBe("finished");
-    expect(state.winnerId).toBe(P1);
+    const target = state.tileDefs.findIndex((tile) => tile.kind === "transport");
+    state.tiles[target]!.ownerId = P1;
+    state.players[0]!.properties.push(state.tileDefs[target]!.id as never);
+    state.turnSeat = 1;
+    state.players[1]!.position = target - 3;
+    const result = roll(state, [1, 2]);
+    expect(result.state.players[1]!.status).toBe("bankrupt");
+    expect(result.state.phase).toBe("finished");
+    expect(result.state.winnerId).toBe(P1);
     expect(result.events.some((event) => event.type === "game-ended")).toBe(true);
   });
 
@@ -227,9 +174,9 @@ describe("engine core loop", () => {
   it("upgrades an owned property", () => {
     let state = makeGame();
     state = roll(state, [1, 2]).state;
-    state = reduce(state, { type: "buy-property", playerId: P1 }).state;
+    state = act(state, { type: "buy-property", playerId: P1 }).state;
     const cost = state.tileDefs[3]!.upgradeCosts![0]!;
-    state = reduce(state, {
+    state = act(state, {
       type: "upgrade-property",
       playerId: P1,
       tileIndex: 3,
@@ -241,27 +188,126 @@ describe("engine core loop", () => {
   });
 
   it("blocks other actions while a decision is pending", () => {
-    const state = makeGame();
-    const rolled = roll(state, [1, 2]);
-    expect(() =>
-      reduce(rolled.state, { type: "end-turn", playerId: P1 }),
-    ).toThrowError(EngineError);
-    expect(() =>
-      reduce(rolled.state, { type: "roll-dice", playerId: P1 }),
-    ).toThrowError(EngineError);
+    const rolled = roll(makeGame(), [1, 2]);
+    expect(() => act(rolled.state, { type: "end-turn", playerId: P1 })).toThrowError(
+      EngineError,
+    );
+    expect(() => act(rolled.state, { type: "roll-dice", playerId: P1 })).toThrowError(
+      EngineError,
+    );
   });
 
   it("rejects upgrading a property you do not own", () => {
     const state = makeGame();
     expect(() =>
-      reduce(state, { type: "upgrade-property", playerId: P1, tileIndex: 3 }),
+      act(state, { type: "upgrade-property", playerId: P1, tileIndex: 3 }),
     ).toThrowError(EngineError);
   });
 
   it("rejects acting out of turn", () => {
     const state = makeGame();
     expect(() =>
-      reduce(state, { type: "roll-dice", playerId: P2, forcedDice: [1, 1] }),
+      act(state, { type: "roll-dice", playerId: P2, forcedDice: [1, 1] }),
     ).toThrowError(EngineError);
+  });
+
+  it("does not stall when a jail break lands on costly rent (M1 regression)", () => {
+    const state = makeGame({
+      economy: { transportRents: [50000, 50000, 50000, 50000] },
+    });
+    const transport = state.tileDefs.findIndex((tile) => tile.kind === "transport");
+    state.tiles[transport]!.ownerId = P1;
+    state.players[0]!.properties.push(state.tileDefs[transport]!.id as never);
+    state.turnSeat = 1;
+    state.players[1]!.position = transport - 4;
+    state.players[1]!.status = "jailed";
+    state.players[1]!.statusTurns = 2;
+    const result = roll(state, [2, 2]);
+    expect(result.state.players[1]!.status).toBe("bankrupt");
+    expect(result.state.phase).toBe("finished");
+    expect(result.state.winnerId).toBe(P1);
+  });
+
+  it("advances past a bankrupt current player instead of stalling (M2 regression)", () => {
+    const state = makeGame({
+      playerCount: 3,
+      economy: { transportRents: [50000, 50000, 50000, 50000] },
+    });
+    const transport = state.tileDefs.findIndex((tile) => tile.kind === "transport");
+    state.tiles[transport]!.ownerId = P2;
+    state.players[1]!.properties.push(state.tileDefs[transport]!.id as never);
+    state.players[0]!.position = transport - 3;
+    const result = roll(state, [1, 2]);
+    expect(result.state.players[0]!.status).toBe("bankrupt");
+    expect(result.state.phase).not.toBe("finished");
+    expect(result.state.turnSeat).toBe(1);
+    expect(result.state.phase).toBe("await-roll");
+  });
+
+  it("discounts mortgaged tiles in net worth (M3 regression)", () => {
+    let state = makeGame();
+    state = roll(state, [1, 2]).state;
+    state = act(state, { type: "buy-property", playerId: P1 }).state;
+    const before = netWorth(state, P1);
+    state = act(state, {
+      type: "mortgage-property",
+      playerId: P1,
+      tileIndex: 3,
+    }).state;
+    const after = netWorth(state, P1);
+    expect(after).toBe(before);
+    expect(after).toBe(
+      defaultEconomy.startingMoney - 650 + Math.round(650 * 0.5) + Math.round(650 * 0.5),
+    );
+  });
+
+  it("indexes transport rents by count (4-length table)", () => {
+    const state = makeGame();
+    const transports = state.tileDefs
+      .map((tile, index) => ({ tile, index }))
+      .filter((entry) => entry.tile.kind === "transport")
+      .map((entry) => entry.index);
+    for (const index of transports) {
+      state.tiles[index]!.ownerId = P1;
+    }
+    state.turnSeat = 1;
+    state.players[1]!.position = transports[0]! - 2;
+    const result = roll(state, [1, 1]);
+    expect(result.state.players[1]!.position).toBe(transports[0]);
+    const expected =
+      state.config.economy.transportRents[transports.length - 1] ?? 0;
+    expect(result.state.players[1]!.money).toBe(
+      defaultEconomy.startingMoney - expected,
+    );
+  });
+
+  it("charges flat and percent-cash taxes", () => {
+    const state = makeGame();
+    const taxTiles = state.tileDefs
+      .map((tile, index) => ({ tile, index }))
+      .filter((entry) => entry.tile.kind === "tax");
+    const percent = taxTiles.find((entry) => entry.tile.tax?.kind === "percent-cash")!;
+    state.players[0]!.position = percent.index - 2;
+    state.players[0]!.status = "active";
+    const result = roll(state, [1, 1]);
+    const rate = (percent.tile.tax as { rate: number }).rate;
+    const expected = Math.round(
+      defaultEconomy.startingMoney * rate,
+    );
+    expect(result.state.players[0]!.money).toBe(
+      defaultEconomy.startingMoney - expected,
+    );
+  });
+
+  it("hands out the start bonus when landing on start", () => {
+    const state = makeGame({ characters: ["xue-ba", "xue-ba"] });
+    state.players[0]!.position = 38;
+    const result = roll(state, [1, 1]);
+    expect(result.state.players[0]!.position).toBe(0);
+    expect(result.state.players[0]!.money).toBe(
+      defaultEconomy.startingMoney +
+        defaultEconomy.goSalary +
+        defaultEconomy.startLandingBonus,
+    );
   });
 });

@@ -17,6 +17,7 @@ export const itemDefs: ItemDef[] = [
     icon: "🚧",
     price: 1500,
     target: "tile",
+    targetRange: 6,
     effects: [{ kind: "place-roadblock" }],
   },
   {

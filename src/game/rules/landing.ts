@@ -1,62 +1,32 @@
-import type { GameEvent, GameState, PlayerId, TileDef } from "../core/types";
-import { addMoney, findPlayer, transferMoney } from "./money";
-import { findTileIndex, teleportPlayer } from "./movement";
+import type {
+  DeckId,
+  GameContent,
+  GameEvent,
+  GameState,
+  PlayerId,
+  TileDef,
+  TileKind,
+} from "../core/types";
+import { addMoney, findPlayer, payMoney } from "./money";
 import { rentForTile } from "./rent";
+import { sendToJail } from "./status";
+import { discountedPrice, mitigationFactor } from "../systems/skills";
 import { rngShuffle } from "../core/rng";
 
-export function sendToJail(
-  state: GameState,
-  events: GameEvent[],
-  playerId: PlayerId,
-  turns?: number,
-): void {
-  const jailIndex = findTileIndex(state, "jail");
-  const player = findPlayer(state, playerId);
-  teleportPlayer(state, events, playerId, jailIndex);
-  player.status = "jailed";
-  player.statusTurns = turns ?? state.config.economy.jailTurns;
-  player.doublesStreak = 0;
-  events.push({ type: "jailed", playerId, turns: player.statusTurns });
-  events.push({ type: "log", text: `${player.name} 被押入监狱`, icon: "🚔" });
-}
-
-export function hospitalize(
-  state: GameState,
-  events: GameEvent[],
-  playerId: PlayerId,
-  turns?: number,
-): void {
-  const hospitalIndex = findTileIndex(state, "hospital");
-  const player = findPlayer(state, playerId);
-  teleportPlayer(state, events, playerId, hospitalIndex);
-  player.status = "hospitalized";
-  player.statusTurns = turns ?? state.config.economy.hospitalTurns;
-  events.push({ type: "hospitalized", playerId, turns: player.statusTurns });
-  events.push({ type: "log", text: `${player.name} 住进了医院`, icon: "🏥" });
-}
-
-export function releasePlayer(
-  state: GameState,
-  events: GameEvent[],
-  playerId: PlayerId,
-  from: "jail" | "hospital",
-): void {
-  const player = findPlayer(state, playerId);
-  player.status = "active";
-  player.statusTurns = 0;
-  events.push({ type: "released", playerId, from });
-  events.push({
-    type: "log",
-    text: `${player.name} ${from === "jail" ? "重获自由" : "康复出院"}`,
-    icon: from === "jail" ? "🔓" : "💚",
-  });
+interface LandingContext {
+  state: GameState;
+  events: GameEvent[];
+  content: GameContent;
+  playerId: PlayerId;
+  tileIndex: number;
+  diceSum: number;
 }
 
 export function drawCard(
   state: GameState,
   events: GameEvent[],
   playerId: PlayerId,
-  deck: "chance" | "fate",
+  deck: DeckId,
 ): string | null {
   const deckKey = deck === "chance" ? "chanceDeck" : "fateDeck";
   const discardKey = deck === "chance" ? "chanceDiscard" : "fateDiscard";
@@ -79,37 +49,22 @@ export function drawCard(
   return cardId;
 }
 
-export function bankruptPlayer(
-  state: GameState,
-  events: GameEvent[],
-  playerId: PlayerId,
-  creditorId: PlayerId | null,
-): void {
+function handleStart(ctx: LandingContext): void {
+  const { state, events, playerId } = ctx;
+  const bonus = state.config.economy.startLandingBonus;
   const player = findPlayer(state, playerId);
-  player.status = "bankrupt";
-  player.money = 0;
-  player.statusTurns = 0;
-  player.items = [];
-  for (const tile of state.tiles) {
-    if (tile.ownerId === playerId) {
-      tile.ownerId = null;
-      tile.level = 0;
-      tile.mortgaged = false;
-      tile.effects = [];
-    }
+  if (bonus > 0) {
+    addMoney(state, events, playerId, bonus, "salary");
+    events.push({
+      type: "log",
+      text: `${player.name} 停留起点，额外获得 ${bonus} 元`,
+      icon: "🎊",
+    });
   }
-  player.properties = [];
-  events.push({ type: "player-bankrupt", playerId, creditorId });
-  events.push({ type: "log", text: `${player.name} 破产离场`, icon: "💥" });
 }
 
-function resolvePropertyLanding(
-  state: GameState,
-  events: GameEvent[],
-  playerId: PlayerId,
-  tileIndex: number,
-  diceSum: number,
-): void {
+function handleProperty(ctx: LandingContext): void {
+  const { state, events, content, playerId, tileIndex, diceSum } = ctx;
   const def = state.tileDefs[tileIndex] as TileDef;
   const tile = state.tiles[tileIndex];
   const player = findPlayer(state, playerId);
@@ -117,14 +72,9 @@ function resolvePropertyLanding(
     return;
   }
   if (tile.ownerId === null) {
-    const price = def.price ?? 0;
+    const price = discountedPrice(state, content, playerId, def.price ?? 0, "buy-discount");
     if (player.money >= price) {
-      state.pending = {
-        kind: "buy-property",
-        playerId,
-        tileIndex,
-        price,
-      };
+      state.pending = { kind: "buy-property", playerId, tileIndex, price };
       events.push({ type: "decision-requested", decision: state.pending });
     } else {
       events.push({
@@ -146,7 +96,7 @@ function resolvePropertyLanding(
     });
     return;
   }
-  const rent = rentForTile(state, tileIndex, diceSum);
+  const rent = rentForTile(state, content, tileIndex, diceSum, playerId);
   if (rent <= 0) {
     return;
   }
@@ -160,7 +110,7 @@ function resolvePropertyLanding(
     return;
   }
   const owner = findPlayer(state, tile.ownerId);
-  transferMoney(state, events, playerId, tile.ownerId, rent, "rent");
+  payMoney(state, events, playerId, rent, "rent", tile.ownerId);
   player.stats.rentPaid += rent;
   owner.stats.rentReceived += rent;
   events.push({
@@ -175,27 +125,24 @@ function resolvePropertyLanding(
     text: `${player.name} 向 ${owner.name} 支付过路费 ${rent} 元`,
     icon: "💸",
   });
-  if (player.money < 0) {
-    bankruptPlayer(state, events, playerId, tile.ownerId);
-  }
 }
 
-function resolveTaxLanding(
-  state: GameState,
-  events: GameEvent[],
-  playerId: PlayerId,
-  tileIndex: number,
-): void {
+function handleTax(ctx: LandingContext): void {
+  const { state, events, content, playerId, tileIndex } = ctx;
   const def = state.tileDefs[tileIndex] as TileDef;
   const player = findPlayer(state, playerId);
   if (!def?.tax) {
     return;
   }
-  const amount =
+  const raw =
     def.tax.kind === "percent-cash"
       ? Math.round(Math.max(0, player.money) * def.tax.rate)
       : def.tax.amount;
-  addMoney(state, events, playerId, -amount, "tax");
+  const amount = Math.max(
+    0,
+    Math.round(raw * mitigationFactor(state, content, playerId)),
+  );
+  payMoney(state, events, playerId, amount, "tax", null);
   player.stats.taxPaid += amount;
   events.push({ type: "tax-paid", playerId, amount, label: def.name });
   events.push({
@@ -203,60 +150,93 @@ function resolveTaxLanding(
     text: `${player.name} 缴纳 ${def.name} ${amount} 元`,
     icon: "🧾",
   });
-  if (player.money < 0) {
-    bankruptPlayer(state, events, playerId, null);
-  }
 }
+
+function handleCard(ctx: LandingContext): void {
+  const { state, events, content, playerId, tileIndex } = ctx;
+  const def = state.tileDefs[tileIndex] as TileDef;
+  const deck: DeckId = def.kind === "chance" ? "chance" : "fate";
+  const cardId = drawCard(state, events, playerId, deck);
+  if (!cardId) {
+    return;
+  }
+  const card = content.cards[cardId];
+  if (!card) {
+    return;
+  }
+  events.push({
+    type: "card-played",
+    playerId,
+    cardId,
+  });
+  events.push({ type: "log", text: `${card.title}：${card.text}`, icon: card.icon ?? "🎴" });
+  state.queue.push({
+    kind: "effects",
+    playerId,
+    effects: card.effects,
+    index: 0,
+    target: null,
+    sourceKind: "card",
+    sourceId: cardId,
+  });
+}
+
+function handleGotoJail(ctx: LandingContext): void {
+  const { state, events, content, playerId } = ctx;
+  const player = findPlayer(state, playerId);
+  events.push({
+    type: "log",
+    text: `${player.name} 被巡捕抓住，直接入狱`,
+    icon: "🚔",
+  });
+  sendToJail(state, events, content, playerId);
+}
+
+function handleIdle(message: string): (ctx: LandingContext) => void {
+  return (ctx) => {
+    const player = findPlayer(ctx.state, ctx.playerId);
+    ctx.events.push({
+      type: "log",
+      text: `${player.name} ${message}`,
+      icon: "⛩️",
+    });
+  };
+}
+
+const TILE_HANDLERS: Record<TileKind, (ctx: LandingContext) => void> = {
+  start: handleStart,
+  property: handleProperty,
+  transport: handleProperty,
+  utility: handleProperty,
+  chance: handleCard,
+  fate: handleCard,
+  tax: handleTax,
+  "goto-jail": handleGotoJail,
+  jail: handleIdle("路过监狱，安然无恙"),
+  hospital: handleIdle("到医院探望病人"),
+  shop: handleIdle("到达商店街，可以购买道具"),
+  lottery: handleIdle("到达彩票站，可以试试手气"),
+};
 
 export function resolveLanding(
   state: GameState,
   events: GameEvent[],
+  content: GameContent,
   playerId: PlayerId,
   diceSum: number,
 ): void {
   const player = findPlayer(state, playerId);
+  if (player.status === "bankrupt") {
+    return;
+  }
   const tileIndex = player.position;
   const def = state.tileDefs[tileIndex] as TileDef;
   if (!def) {
     return;
   }
-  switch (def.kind) {
-    case "start": {
-      addMoney(
-        state,
-        events,
-        playerId,
-        state.config.economy.startLandingBonus,
-        "salary",
-      );
-      events.push({
-        type: "log",
-        text: `${player.name} 停留起点，额外获得 ${state.config.economy.startLandingBonus} 元`,
-        icon: "🎊",
-      });
-      return;
-    }
-    case "tax":
-      resolveTaxLanding(state, events, playerId, tileIndex);
-      return;
-    case "goto-jail":
-      sendToJail(state, events, playerId);
-      return;
-    case "chance":
-    case "fate":
-      drawCard(state, events, playerId, def.kind === "chance" ? "chance" : "fate");
-      events.push({
-        type: "log",
-        text: `${player.name} 抽到一张${def.name}卡`,
-        icon: "🎴",
-      });
-      return;
-    case "property":
-    case "transport":
-    case "utility":
-      resolvePropertyLanding(state, events, playerId, tileIndex, diceSum);
-      return;
-    default:
-      return;
+  const handler = TILE_HANDLERS[def.kind];
+  if (!handler) {
+    return;
   }
+  handler({ state, events, content, playerId, tileIndex, diceSum });
 }

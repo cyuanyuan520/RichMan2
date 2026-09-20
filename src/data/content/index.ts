@@ -1,9 +1,11 @@
 import type {
   CardDef,
   CharacterDef,
+  GameContent,
   ItemDef,
   MapDef,
 } from "@/game/core/types";
+import { computeContentHash } from "@/game/core/state";
 import { defaultEconomy } from "./economy";
 import { chinaJourneyMap } from "../maps/china-journey";
 import { inkMap } from "../maps/ink";
@@ -33,11 +35,56 @@ export const charactersById = new Map(
   characters.map((character) => [character.id as string, character]),
 );
 
+export function buildGameContent(mapId: string): GameContent {
+  const map = mapsById.get(mapId);
+  if (!map) {
+    throw new Error(`Unknown map ${mapId}`);
+  }
+  const cardMap: Record<string, CardDef> = {};
+  for (const card of cards) {
+    cardMap[card.id] = card;
+  }
+  const itemMap: Record<string, ItemDef> = {};
+  for (const item of items) {
+    itemMap[item.id] = item;
+  }
+  const characterMap: Record<string, CharacterDef> = {};
+  for (const character of characters) {
+    characterMap[character.id as string] = character;
+  }
+  const content = {
+    map,
+    cards: cardMap,
+    items: itemMap,
+    characters: characterMap,
+  };
+  return {
+    ...content,
+    contentHash: computeContentHash(content),
+  };
+}
+
+function assertUniqueIds(): void {
+  const seen = new Set<string>();
+  for (const def of [...cards, ...items, ...characters]) {
+    const id = def.id as string;
+    if (seen.has(id)) {
+      throw new Error(`Duplicate content id ${id}`);
+    }
+    seen.add(id);
+  }
+}
+
 export function assertMapStructure(map: MapDef): void {
   MapDefSchema.parse(map);
   const counts: Record<string, number> = {};
+  const tileIds = new Set<string>();
   for (const tile of map.tiles) {
     counts[tile.kind] = (counts[tile.kind] ?? 0) + 1;
+    if (tileIds.has(tile.id)) {
+      throw new Error(`Map ${map.id} has duplicate tile id ${tile.id}`);
+    }
+    tileIds.add(tile.id);
   }
   const expected: Record<string, number> = {
     start: 1,
@@ -72,6 +119,16 @@ export function assertMapStructure(map: MapDef): void {
       if (!tile.price || !tile.rents || !tile.upgradeCosts) {
         throw new Error(`Map ${map.id} tile ${tile.id} missing economy data`);
       }
+      if (tile.rents.length <= defaultEconomy.maxBuildingLevel) {
+        throw new Error(
+          `Map ${map.id} tile ${tile.id} rents must cover max building level`,
+        );
+      }
+      if (tile.upgradeCosts.length < defaultEconomy.maxBuildingLevel) {
+        throw new Error(
+          `Map ${map.id} tile ${tile.id} upgradeCosts must cover max building level`,
+        );
+      }
     }
     if (map.layout === "path" && !tile.coord) {
       throw new Error(`Map ${map.id} path tile ${tile.id} missing coord`);
@@ -81,6 +138,7 @@ export function assertMapStructure(map: MapDef): void {
 
 export function validateContent(): void {
   EconomyConfigSchema.parse(economy);
+  assertUniqueIds();
   for (const map of maps) {
     assertMapStructure(map);
   }
@@ -93,8 +151,17 @@ export function validateContent(): void {
   for (const character of characters) {
     CharacterDefSchema.parse(character);
   }
-  for (const def of [...cards, ...items]) {
-    for (const effect of def.effects) {
+  for (const def of [...cards, ...items, ...characters]) {
+    const effects = [];
+    if ("effects" in def) {
+      effects.push(...def.effects);
+    }
+    if ("skills" in def) {
+      for (const skill of def.skills) {
+        effects.push(...(skill.effects ?? []));
+      }
+    }
+    for (const effect of effects) {
       if (effect.kind === "gain-item" && !itemsById.has(effect.itemDefId)) {
         throw new Error(`${def.id} references unknown item ${effect.itemDefId}`);
       }

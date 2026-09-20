@@ -94,17 +94,15 @@ export const EconomyConfigSchema: z.ZodType<EconomyConfig> = z.object({
   jailFine: z.number().int().positive(),
   jailTurns: z.number().int().min(1),
   hospitalTurns: z.number().int().min(1),
-  hospitalFee: z.number().int().min(0),
   maxBuildingLevel: z.number().int().min(1).max(5),
   groupMonopolyRentBonus: z.number().min(1),
-  transportRents: z.array(z.number().int().min(0)).min(2),
+  transportRents: z.array(z.number().int().min(0)).min(4),
   utilityMultipliers: z.array(z.number().min(1)).min(2),
   mortgageRefundRate: z.number().min(0).max(1),
   mortgageInterest: z.number().min(0),
+  sellRefundRate: z.number().min(0).max(1),
   lotteryTicketPrice: z.number().int().positive(),
-  lotteryPrizes: z.array(z.number().int().min(0)),
-  shopDiscountRate: z.number().min(0).max(1),
-  taxRefundRate: z.number().min(0),
+  lotteryPrizes: z.array(z.number().int().min(0)).min(1),
 });
 
 export const MoveDestinationSchema = z.enum([
@@ -153,7 +151,7 @@ export const CardDefSchema: z.ZodType<CardDef> = z.object({
   text: z.string().min(1),
   icon: z.string().optional(),
   effects: z.array(CardEffectSchema).min(1),
-  weight: z.number().positive().optional(),
+  weight: z.number().int().min(1).optional(),
 });
 
 export const ItemDefSchema: z.ZodType<ItemDef> = z.object({
@@ -163,8 +161,8 @@ export const ItemDefSchema: z.ZodType<ItemDef> = z.object({
   icon: z.string().optional(),
   price: z.number().int().positive(),
   target: z.enum(["none", "self", "opponent", "tile", "opponent-property"]),
+  targetRange: z.number().int().min(1).max(12).optional(),
   effects: z.array(CardEffectSchema).min(1),
-  combatOnly: z.boolean().optional(),
 });
 
 const SkillDefSchema = z.object({
@@ -173,9 +171,7 @@ const SkillDefSchema = z.object({
   text: z.string().min(1),
   icon: z.string().optional(),
   trigger: z.enum([
-    "game-start",
     "pass-start",
-    "turn-start",
     "buy-discount",
     "upgrade-discount",
     "rent-discount",

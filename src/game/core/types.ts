@@ -90,18 +90,25 @@ export interface EconomyConfig {
   jailFine: number;
   jailTurns: number;
   hospitalTurns: number;
-  hospitalFee: number;
   maxBuildingLevel: number;
   groupMonopolyRentBonus: number;
   transportRents: number[];
   utilityMultipliers: number[];
   mortgageRefundRate: number;
   mortgageInterest: number;
+  sellRefundRate: number;
   lotteryTicketPrice: number;
   lotteryPrizes: number[];
-  shopDiscountRate: number;
-  taxRefundRate: number;
 }
+
+export type MoveDestination =
+  | "start"
+  | "jail"
+  | "hospital"
+  | "shop"
+  | "lottery"
+  | "nearest-transport"
+  | "random-property";
 
 export type CardEffect =
   | { kind: "money"; amount: number }
@@ -128,14 +135,19 @@ export type CardEffect =
   | { kind: "force-buy"; multiplier: number }
   | { kind: "share-wealth" };
 
-export type MoveDestination =
-  | "start"
-  | "jail"
-  | "hospital"
-  | "shop"
-  | "lottery"
-  | "nearest-transport"
-  | "random-property";
+export type TargetedEffectKind =
+  | "swap-position"
+  | "teleport"
+  | "place-roadblock"
+  | "demolish"
+  | "skip-turn"
+  | "audit"
+  | "force-buy";
+
+export interface EffectTarget {
+  playerId?: PlayerId;
+  tileIndex?: number;
+}
 
 export interface CardDef {
   id: string;
@@ -156,14 +168,12 @@ export interface ItemDef {
   icon?: string;
   price: number;
   target: ItemTargetKind;
+  targetRange?: number;
   effects: CardEffect[];
-  combatOnly?: boolean;
 }
 
 export type SkillTrigger =
-  | "game-start"
   | "pass-start"
-  | "turn-start"
   | "buy-discount"
   | "upgrade-discount"
   | "rent-discount"
@@ -193,11 +203,6 @@ export interface CharacterDef {
   avatar: string;
   color: string;
   skills: SkillDef[];
-}
-
-export interface ItemsStateEntry {
-  defId: string;
-  count: number;
 }
 
 export interface PlayerStats {
@@ -239,6 +244,7 @@ export interface Player {
   skipTurns: number;
   forcedDice: number | null;
   jailFreeCards: number;
+  lotteryBoughtThisTurn: boolean;
   skillCooldowns: Record<string, number>;
   skillCharges: Record<string, number>;
   isBot: boolean;
@@ -267,43 +273,28 @@ export type PendingDecision =
       playerId: PlayerId;
       tileIndex: number;
       price: number;
-      viaCard?: boolean;
-    }
-  | {
-      kind: "upgrade-property";
-      playerId: PlayerId;
-      tileIndex: number;
-      cost: number;
-    }
-  | {
-      kind: "jail-choice";
-      playerId: PlayerId;
-      fine: number;
-    }
-  | {
-      kind: "item-target";
-      playerId: PlayerId;
-      itemId: ItemInstanceId;
-      options: ItemTargetOption[];
     }
   | {
       kind: "raise-funds";
       playerId: PlayerId;
       creditorId: PlayerId | null;
       amount: number;
-      reason: string;
+      reason: MoneyReason;
+    }
+  | {
+      kind: "item-target";
+      playerId: PlayerId;
+      itemId: ItemInstanceId;
+      target: ItemTargetKind;
     }
   | {
       kind: "card-target";
       playerId: PlayerId;
-      cardId: string;
-      options: ItemTargetOption[];
+      sourceId: string;
     }
   | {
-      kind: "confirm";
+      kind: "choose-dice";
       playerId: PlayerId;
-      title: string;
-      text: string;
     };
 
 export interface ItemTargetOption {
@@ -311,7 +302,6 @@ export interface ItemTargetOption {
   playerId?: PlayerId;
   tileIndex?: number;
   label: string;
-  amount?: number;
 }
 
 export type MoneyReason =
@@ -325,7 +315,6 @@ export type MoneyReason =
   | "skill"
   | "lottery"
   | "jail-fine"
-  | "hospital-fee"
   | "mortgage"
   | "unmortgage"
   | "sell-building"
@@ -379,7 +368,9 @@ export type GameEvent =
   | { type: "card-drawn"; playerId: PlayerId; cardId: string; deck: DeckId }
   | { type: "card-played"; playerId: PlayerId; cardId: string; targetId?: PlayerId }
   | { type: "item-bought"; playerId: PlayerId; itemDefId: string; price: number }
+  | { type: "item-gained"; playerId: PlayerId; itemDefId: string }
   | { type: "item-used"; playerId: PlayerId; itemDefId: string; targetId?: PlayerId; tileIndex?: number }
+  | { type: "skill-used"; playerId: PlayerId; skillId: string }
   | { type: "roadblock-placed"; playerId: PlayerId; tileIndex: number }
   | { type: "roadblock-triggered"; playerId: PlayerId; tileIndex: number }
   | { type: "jailed"; playerId: PlayerId; turns: number }
@@ -402,6 +393,14 @@ export type TurnPhase =
   | "action-window"
   | "finished";
 
+export interface GameContent {
+  map: MapDef;
+  cards: Record<string, CardDef>;
+  items: Record<string, ItemDef>;
+  characters: Record<string, CharacterDef>;
+  contentHash: string;
+}
+
 export interface GameSetup {
   mapId: MapId;
   players: Array<{
@@ -416,12 +415,26 @@ export interface GameSetup {
   economy: EconomyConfig;
 }
 
+export type ResolutionTask =
+  | { kind: "landing"; playerId: PlayerId; diceSum: number }
+  | {
+      kind: "effects";
+      playerId: PlayerId;
+      effects: CardEffect[];
+      index: number;
+      target: EffectTarget | null;
+      sourceKind: "card" | "item" | "skill";
+      sourceId: string;
+    };
+
 export interface GameState {
   version: number;
   mapId: MapId;
+  contentHash: string;
   seq: number;
   rng: RngState;
   seed: number;
+  itemSeq: number;
   round: number;
   turnSeat: number;
   phase: TurnPhase;
@@ -435,6 +448,7 @@ export interface GameState {
   chanceDiscard: string[];
   fateDiscard: string[];
   pending: PendingDecision | null;
+  queue: ResolutionTask[];
   config: {
     targetRounds: number;
     economy: EconomyConfig;
@@ -453,12 +467,17 @@ export type GameAction =
   | { type: "buy-property"; playerId: PlayerId }
   | { type: "decline-buy"; playerId: PlayerId }
   | { type: "upgrade-property"; playerId: PlayerId; tileIndex: number }
-  | { type: "use-item"; playerId: PlayerId; itemId: ItemInstanceId; targetPlayerId?: PlayerId; targetTileIndex?: number }
   | { type: "sell-building"; playerId: PlayerId; tileIndex: number }
   | { type: "mortgage-property"; playerId: PlayerId; tileIndex: number }
   | { type: "unmortgage-property"; playerId: PlayerId; tileIndex: number }
   | { type: "buy-item"; playerId: PlayerId; itemDefId: string }
+  | { type: "use-item"; playerId: PlayerId; itemId: ItemInstanceId }
+  | { type: "use-skill"; playerId: PlayerId; skillId: string }
+  | { type: "buy-lottery"; playerId: PlayerId }
   | { type: "pay-jail-fine"; playerId: PlayerId }
+  | { type: "resolve-target"; playerId: PlayerId; target: EffectTarget }
+  | { type: "cancel-target"; playerId: PlayerId }
+  | { type: "choose-dice"; playerId: PlayerId; value: number }
   | { type: "give-up"; playerId: PlayerId }
   | { type: "end-turn"; playerId: PlayerId }
   | { type: "raise-funds-done"; playerId: PlayerId }
@@ -466,5 +485,6 @@ export type GameAction =
 
 export interface ReduceResult {
   state: GameState;
+  seq: number;
   events: GameEvent[];
 }

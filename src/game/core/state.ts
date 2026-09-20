@@ -1,15 +1,58 @@
-import type { GameSetup, GameState, MapDef, Player } from "@/game/core/types";
+import type {
+  CardDef,
+  DeckId,
+  GameContent,
+  GameEvent,
+  GameSetup,
+  GameState,
+  Player,
+} from "@/game/core/types";
+
+export type { GameContent } from "@/game/core/types";
 import { createRng, rngShuffle } from "@/game/core/rng";
 import { EngineError } from "@/game/core/errors";
 import { asPlayerId } from "@/game/core/ids";
 
-export interface GameContent {
-  map: MapDef;
-  chanceDeck: string[];
-  fateDeck: string[];
+export const STATE_VERSION = 2;
+
+export function hashContent(input: string): string {
+  let h = 2166136261;
+  for (let i = 0; i < input.length; i += 1) {
+    h ^= input.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(16).padStart(8, "0");
 }
 
-export const STATE_VERSION = 1;
+export function computeContentHash(content: {
+  map: { id: string; tiles: unknown[] };
+  cards: Record<string, CardDef>;
+  items: Record<string, unknown>;
+  characters: Record<string, unknown>;
+}): string {
+  const parts = [
+    content.map.id,
+    String(content.map.tiles.length),
+    ...Object.keys(content.cards).sort(),
+    ...Object.keys(content.items).sort(),
+    ...Object.keys(content.characters).sort(),
+  ];
+  return hashContent(parts.join("|"));
+}
+
+function expandDeck(cards: Record<string, CardDef>, deck: DeckId): string[] {
+  const result: string[] = [];
+  for (const card of Object.values(cards)) {
+    if (card.deck !== deck) {
+      continue;
+    }
+    const copies = Math.max(1, Math.floor(card.weight ?? 1));
+    for (let i = 0; i < copies; i += 1) {
+      result.push(card.id);
+    }
+  }
+  return result;
+}
 
 export function createGameState(
   setup: GameSetup,
@@ -20,9 +63,9 @@ export function createGameState(
   }
   const seed = setup.seed >>> 0;
   let rng = createRng(seed);
-  const [chanceDeck, rngAfterChance] = rngShuffle(rng, content.chanceDeck);
+  const [chanceDeck, rngAfterChance] = rngShuffle(rng, expandDeck(content.cards, "chance"));
   rng = rngAfterChance;
-  const [fateDeck, rngAfterFate] = rngShuffle(rng, content.fateDeck);
+  const [fateDeck, rngAfterFate] = rngShuffle(rng, expandDeck(content.cards, "fate"));
   rng = rngAfterFate;
 
   const players: Player[] = setup.players.map((entry, seat) => ({
@@ -42,6 +85,7 @@ export function createGameState(
     skipTurns: 0,
     forcedDice: null,
     jailFreeCards: 0,
+    lotteryBoughtThisTurn: false,
     skillCooldowns: {},
     skillCharges: {},
     isBot: entry.isBot,
@@ -64,9 +108,11 @@ export function createGameState(
   return {
     version: STATE_VERSION,
     mapId: content.map.id,
+    contentHash: content.contentHash,
     seq: 0,
     rng,
     seed,
+    itemSeq: 0,
     round: 1,
     turnSeat: 0,
     phase: "await-roll",
@@ -87,6 +133,7 @@ export function createGameState(
     chanceDiscard: [],
     fateDiscard: [],
     pending: null,
+    queue: [],
     config: {
       targetRounds: setup.targetRounds,
       economy: setup.economy,
@@ -97,14 +144,29 @@ export function createGameState(
   };
 }
 
-export function initialEvents(state: GameState) {
+export function bootstrapGame(
+  setup: GameSetup,
+  content: GameContent,
+): { state: GameState; events: GameEvent[] } {
+  const state = createGameState(setup, content);
   const playerIds = state.players.map((player) => player.id);
-  return [
-    { type: "game-started" as const, playerIds, mapId: state.mapId },
+  const events: GameEvent[] = [
+    { type: "game-started", playerIds, mapId: state.mapId },
     {
-      type: "turn-started" as const,
+      type: "turn-started",
       playerId: playerIds[0] as Player["id"],
       round: state.round,
     },
   ];
+  for (const player of state.players) {
+    for (const skill of content.characters[player.characterId]?.skills ?? []) {
+      if (skill.charges !== undefined) {
+        player.skillCharges[skill.id] = skill.charges;
+      }
+      if (skill.cooldownRounds !== undefined) {
+        player.skillCooldowns[skill.id] = 0;
+      }
+    }
+  }
+  return { state, events };
 }

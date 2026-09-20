@@ -1,4 +1,5 @@
-import type { GameState, PlayerId, TileDef } from "../core/types";
+import type { GameContent, GameState, PlayerId, TileDef } from "../core/types";
+import { rentFactors } from "../systems/skills";
 
 export function countPropertiesInGroup(
   state: GameState,
@@ -46,14 +47,20 @@ export function countOwnedByKind(
 
 export function rentForTile(
   state: GameState,
+  content: GameContent,
   tileIndex: number,
   diceSum: number,
+  payerId?: PlayerId,
 ): number {
   const tile = state.tiles[tileIndex];
   const def = state.tileDefs[tileIndex];
   if (!tile || !def || !tile.ownerId || tile.mortgaged) {
     return 0;
   }
+  const factors =
+    payerId !== undefined
+      ? rentFactors(state, content, tile.ownerId, payerId)
+      : 1;
   switch (def.kind) {
     case "property": {
       const base = def.rents?.[tile.level] ?? 0;
@@ -61,11 +68,12 @@ export function rentForTile(
         def.group && hasGroupMonopoly(state, tile.ownerId, def.group)
           ? state.config.economy.groupMonopolyRentBonus
           : 1;
-      return Math.round(base * bonus);
+      return Math.round(base * bonus * factors);
     }
     case "transport": {
       const count = countOwnedByKind(state, tile.ownerId, "transport");
-      return state.config.economy.transportRents[count] ?? 0;
+      const base = state.config.economy.transportRents[count - 1] ?? 0;
+      return Math.round(base * factors);
     }
     case "utility": {
       const count = countOwnedByKind(state, tile.ownerId, "utility");
@@ -73,7 +81,7 @@ export function rentForTile(
         state.config.economy.utilityMultipliers[count - 1] ??
         state.config.economy.utilityMultipliers[0] ??
         4;
-      return diceSum * multiplier;
+      return Math.round(diceSum * multiplier * factors);
     }
     default:
       return 0;
