@@ -13,7 +13,7 @@ import { createRng, rngShuffle } from "@/game/core/rng";
 import { EngineError } from "@/game/core/errors";
 import { asPlayerId } from "@/game/core/ids";
 
-export const STATE_VERSION = 2;
+export const STATE_VERSION = 3;
 
 export function hashContent(input: string): string {
   let h1 = 2166136261;
@@ -112,7 +112,6 @@ export function createGameState(
     skillCharges: {},
     isBot: entry.isBot,
     botDifficulty: entry.botDifficulty ?? "normal",
-    connected: true,
     stats: {
       rolls: 0,
       doubles: 0,

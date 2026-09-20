@@ -3,6 +3,7 @@ import type {
   BotDifficulty,
   EffectTarget,
   GameAction,
+  GameEvent,
   GameState,
   ItemInstanceId,
   PlayerId,
@@ -12,7 +13,8 @@ import { createRng } from "@/game/core/rng";
 export const PROTOCOL_VERSION = 1;
 export const MAX_CHAT_LENGTH = 120;
 export const MAX_NAME_LENGTH = 12;
-export const MAX_INTENT_LOG = 64;
+export const MAX_ID_LENGTH = 64;
+export const MAX_FAILED_HELLOS = 5;
 
 export const EMOTE_IDS = [
   "clap",
@@ -29,9 +31,11 @@ export type EmoteId = (typeof EMOTE_IDS)[number];
 const emoteSchema = z.enum(EMOTE_IDS);
 
 const targetSchema = z.object({
-  playerId: z.string().optional(),
+  playerId: z.string().max(MAX_ID_LENGTH).optional(),
   tileIndex: z.number().int().optional(),
 });
+
+const idSchema = z.string().min(1).max(MAX_ID_LENGTH);
 
 export const intentSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("roll-dice") }),
@@ -41,14 +45,17 @@ export const intentSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("sell-building"), tileIndex: z.number().int() }),
   z.object({ type: z.literal("mortgage-property"), tileIndex: z.number().int() }),
   z.object({ type: z.literal("unmortgage-property"), tileIndex: z.number().int() }),
-  z.object({ type: z.literal("buy-item"), itemDefId: z.string() }),
-  z.object({ type: z.literal("use-item"), itemId: z.string() }),
-  z.object({ type: z.literal("use-skill"), skillId: z.string() }),
+  z.object({ type: z.literal("buy-item"), itemDefId: idSchema }),
+  z.object({ type: z.literal("use-item"), itemId: idSchema }),
+  z.object({ type: z.literal("use-skill"), skillId: idSchema }),
   z.object({ type: z.literal("buy-lottery") }),
   z.object({ type: z.literal("pay-jail-fine") }),
   z.object({ type: z.literal("resolve-target"), target: targetSchema }),
   z.object({ type: z.literal("cancel-target") }),
-  z.object({ type: z.literal("choose-dice"), value: z.number().int() }),
+  z.object({
+    type: z.literal("choose-dice"),
+    value: z.number().int().min(1).max(6),
+  }),
   z.object({ type: z.literal("raise-funds-done") }),
   z.object({ type: z.literal("declare-bankrupt") }),
   z.object({ type: z.literal("give-up") }),
@@ -147,11 +154,11 @@ export function actionKey(action: GameAction): string {
 export const helloMessageSchema = z.object({
   type: z.literal("hello"),
   protocol: z.number().int(),
-  contentHash: z.string(),
-  token: z.string().max(64).optional(),
-  name: z.string().min(1).max(MAX_NAME_LENGTH),
-  characterId: z.string().optional(),
-  tokenId: z.string().optional(),
+  contentHash: z.string().max(MAX_ID_LENGTH),
+  token: z.string().max(MAX_ID_LENGTH).optional(),
+  name: z.string().trim().min(1).max(MAX_NAME_LENGTH),
+  characterId: z.string().max(MAX_ID_LENGTH).optional(),
+  tokenId: z.string().max(MAX_ID_LENGTH).optional(),
   botDifficulty: z.enum(["easy", "normal", "hard"]).optional(),
 });
 
@@ -176,12 +183,18 @@ export const pingMessageSchema = z.object({
   t: z.number(),
 });
 
+export const pongMessageSchema = z.object({
+  type: z.literal("pong"),
+  t: z.number(),
+});
+
 export const clientMessageSchema = z.discriminatedUnion("type", [
   helloMessageSchema,
   intentMessageSchema,
   chatMessageSchema,
   emoteMessageSchema,
   pingMessageSchema,
+  pongMessageSchema,
 ]);
 
 export type ClientMessage = z.infer<typeof clientMessageSchema>;
@@ -203,16 +216,18 @@ export interface WelcomeMessage {
   contentHash: string;
   seat: PlayerId;
   token: string;
+  resumeSeq: number;
   lobby: boolean;
   players: SeatInfo[];
   chat: ChatBroadcast[];
+  recentEvents: GameEvent[];
 }
 
 export interface UpdateMessage {
   type: "update";
   seq: number;
   snapshot: GameState;
-  events: import("@/game/core/types").GameEvent[];
+  events: GameEvent[];
   players: SeatInfo[];
 }
 
@@ -238,6 +253,11 @@ export interface EmoteBroadcast {
   at: number;
 }
 
+export interface PingMessage {
+  type: "ping";
+  t: number;
+}
+
 export interface PongMessage {
   type: "pong";
   t: number;
@@ -254,6 +274,7 @@ export type HostMessage =
   | RejectedMessage
   | ChatBroadcast
   | EmoteBroadcast
+  | PingMessage
   | PongMessage
   | SeatUpdateMessage;
 
@@ -266,14 +287,22 @@ export const HIDDEN_STATE_KEYS = [
   "fateDiscard",
 ] as const;
 
+const ZERO_HIDDEN: Pick<GameState, (typeof HIDDEN_STATE_KEYS)[number]> = {
+  rng: createRng(0),
+  seed: 0,
+  chanceDeck: [],
+  fateDeck: [],
+  chanceDiscard: [],
+  fateDiscard: [],
+};
+
 export function sanitizeState(state: GameState): GameState {
   const clone = structuredClone(state);
-  clone.rng = createRng(0);
-  clone.seed = 0;
-  clone.chanceDeck = [];
-  clone.fateDeck = [];
-  clone.chanceDiscard = [];
-  clone.fateDiscard = [];
+  const hidden = ZERO_HIDDEN as Record<string, unknown>;
+  const target = clone as unknown as Record<string, unknown>;
+  for (const key of HIDDEN_STATE_KEYS) {
+    target[key] = structuredClone(hidden[key]);
+  }
   return clone;
 }
 

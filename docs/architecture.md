@@ -93,14 +93,19 @@ src/
 - 主机权威：主机持有完整 `GameState` 并运行引擎；客户端只发送 `ClientIntent`
   （无 `forcedDice`、无 `playerId` 等服务端字段，zod 解析时剥离未知字段）。
   每次意图先经 `getLegalActions` 白名单核对 `actionKey`，非法即 rejected。
-- 消息：`hello`（协议版本 + contentHash 握手 + 可选 token 重连 + 昵称/角色/棋子）
-  → `welcome`（座位、令牌、大厅状态、聊天记录）；
+- 消息：`hello`（协议版本 + contentHash 握手 + 可选 token 重连 + 昵称/角色/棋子/机器人难度）
+  → `welcome`（座位、令牌、`resumeSeq` 意图序号、大厅状态、聊天记录、最近事件）；
   `update`（`{seq, snapshot, events, players}`，每步广播，客户端按 seq 幂等应用）；
   `intent`（每客户端递增 seq，主机去重）；`chat`/`emote`（主机限流后广播）；
-  `seat-update`；`rejected`（version/content/started/full/invalid）。
-- 快照脱敏：`sanitizeState` 抹去 `rng`/`seed`/牌堆与弃牌堆，客户端无法预知骰子与牌序。
-- 断线重连：座位令牌持久化，重连 hello 携带 token 即可恢复原座位并收到最新快照；
-  开局后无 token 的连接被拒绝（不做观战者）。
+  `seat-update`；`ping`/`pong` 保活；`rejected`（version/content/started/full/invalid）。
+- 快照脱敏：`sanitizeState` 按 `HIDDEN_STATE_KEYS` 抹去 `rng`/`seed`/牌堆与弃牌堆，
+  客户端无法预知骰子与牌序；座位连接状态只从 `SeatInfo` 读取（引擎状态不含网络字段）。
+- 断线重连：座位令牌由 CSPRNG 生成；大厅重连保留原令牌，对局中重连换发新令牌。
+  `welcome.resumeSeq` 让客户端从主机已处理的意图序号继续编号，避免刷新后意图被
+  去重逻辑静默丢弃。开局后无 token 的连接被拒绝（不做观战者）。
+- 保活与防滥用：主机每 5s 对已连接座位发 `ping`，超过 12s 未回 `pong` 判为断线并
+  交给 AI 接管；令牌校验失败/畸形/超长消息累计 5 次直接断开该连接；
+  聊天 8 条/分钟、表情 12 条/分钟；字符串字段均有长度上限。
 - AI 补位：`HostSession.tick()` 在轮到机器人座位或断线超过宽限期的人类座位时，
   用 `chooseAiAction` 自动行动；`autoPlayUntil` 支持测试与单机全自动对局。
 - 房间：`peer-transport.ts` 生成 5 位房间号（去除易混字符）映射到
@@ -109,19 +114,24 @@ src/
 ### 主机循环接口
 
 ```ts
-const host = new HostSession(setup, content);
+const host = new HostSession(setup, content, { now, disconnectGraceMs, hostSeat });
 host.connect(transport);            // 接受 PeerJS 或内存传输
 host.begin();                       // 开局（未认领的人类座位自动转为 AI）
 host.submitIntent(playerId, intent) // 本地玩家/中继意图，返回 { ok, error? }
-host.tick();                        // 机器人或断线座位行动一步（浏览器定时调用）
+host.tick(now);                     // 保活 + 机器人/断线座位行动一步（浏览器定时调用）
 ```
 
 ### 安全与一致性
 
-- 客户端消息全部经 zod 校验；非法消息回 `rejected` 不打断对局。
-- 意图幂等：`seq <= lastIntentSeq` 直接丢弃，避免重连重传重复执行。
+- 客户端消息全部经 zod 校验（意图 id/令牌/昵称等均有长度上限）；非法消息回 `rejected`
+  并计一次警告，累计 5 次断开该连接。
+- 意图幂等：`seq <= lastIntentSeq` 直接丢弃，避免重连重传重复执行；重连时通过
+  `welcome.resumeSeq` 恢复编号。
+- 座位防劫持：令牌 32 位十六进制随机数；非当前连接无法替换已认领座位；猜测令牌
+  不影响在位连接。
 - 内容一致性：`contentHash` 覆盖地图/卡牌/道具/角色全部数值，握手不一致拒绝加入。
-- 事件批次 `{seq, events}` 供 UI 动画对齐；快照与事件同一批次原子下发。
+- 事件批次 `{seq, events}` 供 UI 动画对齐；快照与事件同一批次原子下发；
+  `welcome.recentEvents` 供重连后重建日志面板（不重播动画）。
 
 ## 阶段路线
 

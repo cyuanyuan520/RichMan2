@@ -43,6 +43,7 @@ export class ClientSession {
   seat: PlayerId | null = null;
   token: string | null = null;
   chat: ChatBroadcast[] = [];
+  historyEvents: GameEvent[] = [];
   lastSeq = -1;
   private events: GameEvent[] = [];
   private intentSeq = 0;
@@ -58,6 +59,11 @@ export class ClientSession {
   }
 
   connect(transport: Transport, hello: HelloPayload): void {
+    const previous = this.transport;
+    if (previous) {
+      previous.onMessage(() => {});
+      previous.onClose(() => {});
+    }
     this.transport = transport;
     transport.onClose(() => {
       if (this.transport === transport) {
@@ -80,6 +86,11 @@ export class ClientSession {
         this.token = message.token;
         this.players = message.players;
         this.chat = message.chat ?? [];
+        this.historyEvents = message.recentEvents ?? [];
+        this.lastSeq = -1;
+        this.state = null;
+        this.events = [];
+        this.intentSeq = message.resumeSeq;
         this.handlers.onWelcome?.(message);
         break;
       }
@@ -117,6 +128,12 @@ export class ClientSession {
       }
       case "pong":
         break;
+      case "ping": {
+        if (this.transport?.isOpen()) {
+          this.transport.send({ type: "pong", t: message.t });
+        }
+        break;
+      }
     }
   }
 

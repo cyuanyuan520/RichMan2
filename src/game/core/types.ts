@@ -249,7 +249,6 @@ export interface Player {
   skillCharges: Record<string, number>;
   isBot: boolean;
   botDifficulty: BotDifficulty;
-  connected: boolean;
   stats: PlayerStats;
 }
 

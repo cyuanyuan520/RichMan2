@@ -1,4 +1,5 @@
 import type {
+  BotDifficulty,
   GameContent,
   GameEvent,
   GameSetup,
@@ -13,6 +14,7 @@ import { getLegalActions } from "@/game/selectors/legal";
 import { chooseAiAction } from "@/game/ai";
 import {
   MAX_CHAT_LENGTH,
+  MAX_FAILED_HELLOS,
   PROTOCOL_VERSION,
   actionKey,
   clientMessageSchema,
@@ -36,6 +38,7 @@ interface HostSeat {
   characterId: string;
   tokenId: string;
   isBot: boolean;
+  botDifficulty: BotDifficulty;
   token: string;
   claimed: boolean;
   connected: boolean;
@@ -43,12 +46,19 @@ interface HostSeat {
   disconnectedAt: number | null;
   lastIntentSeq: number;
   chatTimes: number[];
+  emoteTimes: number[];
+  lastPingAt: number;
+  lastPongAt: number;
+  lastPingReplyAt: number;
 }
 
 export interface HostOptions {
   now?: () => number;
   disconnectGraceMs?: number;
   chatLimitPerMinute?: number;
+  emoteLimitPerMinute?: number;
+  pingIntervalMs?: number;
+  livenessTimeoutMs?: number;
   hostSeat?: number;
 }
 
@@ -65,8 +75,9 @@ export class HostSession {
   started = false;
   private seats: HostSeat[] = [];
   private pendingEvents: GameEvent[] = [];
+  private recentEvents: GameEvent[] = [];
   private chatHistory: ChatBroadcast[] = [];
-  private tokenCounter = 0;
+  private strikes = new Map<Transport, number>();
 
   constructor(setup: GameSetup, content: GameContent, options: HostOptions = {}) {
     this.setup = setup;
@@ -75,6 +86,9 @@ export class HostSession {
       now: options.now ?? (() => Date.now()),
       disconnectGraceMs: options.disconnectGraceMs ?? 15000,
       chatLimitPerMinute: options.chatLimitPerMinute ?? 8,
+      emoteLimitPerMinute: options.emoteLimitPerMinute ?? 12,
+      pingIntervalMs: options.pingIntervalMs ?? 5000,
+      livenessTimeoutMs: options.livenessTimeoutMs ?? 12000,
       hostSeat: options.hostSeat ?? 0,
     };
     this.seats = setup.players.map((player, index) => {
@@ -85,21 +99,36 @@ export class HostSession {
         characterId: player.characterId,
         tokenId: player.tokenId,
         isBot: player.isBot,
-        token: isHostSeat ? this.newToken(index + 1) : "",
+        botDifficulty: player.botDifficulty ?? "normal",
+        token: isHostSeat ? this.newToken() : "",
         claimed: isHostSeat,
         connected: isHostSeat,
         transport: null,
         disconnectedAt: null,
         lastIntentSeq: -1,
         chatTimes: [],
+        emoteTimes: [],
+        lastPingAt: 0,
+        lastPongAt: 0,
+        lastPingReplyAt: 0,
       };
     });
   }
 
-  private newToken(seatNumber: number): string {
-    this.tokenCounter += 1;
-    const now = Math.floor(this.options.now()).toString(36);
-    return `t${seatNumber.toString(36)}-${this.tokenCounter.toString(36)}-${now}`;
+  private newToken(): string {
+    const bytes = new Uint8Array(16);
+    globalThis.crypto.getRandomValues(bytes);
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(
+      "",
+    );
+  }
+
+  private stashEvents(events: GameEvent[]): void {
+    this.pendingEvents.push(...events);
+    this.recentEvents.push(...events);
+    if (this.recentEvents.length > 60) {
+      this.recentEvents.splice(0, this.recentEvents.length - 60);
+    }
   }
 
   get startedGame(): boolean {
@@ -115,10 +144,7 @@ export class HostSession {
       isBot: seat.isBot,
       claimed: seat.claimed,
       connected: seat.connected,
-      botDifficulty: (
-        this.state?.players.find((player) => player.id === seat.playerId)
-          ?.botDifficulty ?? "normal"
-      ) as SeatInfo["botDifficulty"],
+      botDifficulty: seat.botDifficulty,
     }));
     if (!this.state) {
       return template;
@@ -146,11 +172,7 @@ export class HostSession {
   private handleRaw(raw: unknown, transport: Transport): void {
     const parsed = clientMessageSchema.safeParse(raw);
     if (!parsed.success) {
-      this.sendTo(transport, {
-        type: "rejected",
-        code: "invalid",
-        reason: "无法识别的消息",
-      });
+      this.strike(transport, "invalid", "无法识别的消息");
       return;
     }
     const message = parsed.data;
@@ -167,14 +189,42 @@ export class HostSession {
       case "emote":
         this.handleEmote(message.emoteId, transport);
         break;
-      case "ping":
-        this.sendTo(transport, { type: "pong", t: message.t });
+      case "ping": {
+        const seat = this.seatForTransport(transport);
+        const now = this.options.now();
+        if (seat && now - seat.lastPingReplyAt >= 500) {
+          seat.lastPingReplyAt = now;
+          this.sendTo(transport, { type: "pong", t: message.t });
+        }
         break;
+      }
+      case "pong": {
+        const seat = this.seatForTransport(transport);
+        if (seat) {
+          seat.lastPongAt = this.options.now();
+        }
+        break;
+      }
     }
   }
 
   private seatForTransport(transport: Transport): HostSeat | undefined {
     return this.seats.find((seat) => seat.transport === transport);
+  }
+
+  private strike(
+    transport: Transport,
+    code: RejectedMessage["code"],
+    reason: string,
+  ): void {
+    const count = (this.strikes.get(transport) ?? 0) + 1;
+    if (count >= MAX_FAILED_HELLOS) {
+      this.strikes.delete(transport);
+      transport.close();
+      return;
+    }
+    this.strikes.set(transport, count);
+    this.sendTo(transport, { type: "rejected", code, reason });
   }
 
   private reject(
@@ -193,40 +243,51 @@ export class HostSession {
       name: string;
       characterId?: string;
       tokenId?: string;
+      botDifficulty?: BotDifficulty;
     },
     transport: Transport,
   ): void {
+    if (this.seatForTransport(transport)) {
+      this.strike(transport, "invalid", "该连接已加入房间");
+      return;
+    }
     if (message.protocol !== PROTOCOL_VERSION) {
-      this.reject(transport, "version", "客户端版本不一致，请刷新页面");
+      this.strike(transport, "version", "客户端版本不一致，请刷新页面");
       return;
     }
     if (message.contentHash !== this.content.contentHash) {
-      this.reject(transport, "content", "游戏内容不一致，请刷新页面");
+      this.strike(transport, "content", "游戏内容不一致，请刷新页面");
       return;
     }
     let seat =
       message.token !== undefined
         ? this.seats.find(
-            (entry) => entry.claimed && entry.token === message.token,
+            (entry) => entry.token !== "" && entry.token === message.token,
           )
         : undefined;
-    const reconnecting = seat !== undefined;
+    const matchedByToken = seat !== undefined;
+    const wasClaimed = seat?.claimed ?? false;
     if (!seat) {
       if (this.started) {
-        this.reject(transport, "started", "对局已开始，无法加入");
+        this.strike(transport, "started", "对局已开始，无法加入");
         return;
       }
       seat = this.seats.find((entry) => !entry.claimed && !entry.isBot);
     }
     if (!seat) {
-      this.reject(transport, "full", "房间已满");
+      this.strike(transport, "full", "房间已满");
       return;
     }
-    seat.transport?.close();
+    if (seat.transport && seat.transport !== transport) {
+      seat.transport.close();
+    }
+    const now = this.options.now();
     seat.transport = transport;
     seat.claimed = true;
     seat.connected = true;
     seat.disconnectedAt = null;
+    seat.lastPingAt = now;
+    seat.lastPongAt = now;
     seat.name = message.name;
     if (message.characterId && this.content.characters[message.characterId]) {
       seat.characterId = message.characterId;
@@ -234,18 +295,24 @@ export class HostSession {
     if (message.tokenId) {
       seat.tokenId = message.tokenId;
     }
-    if (!reconnecting) {
-      seat.token = this.newToken(this.seats.indexOf(seat) + 1);
+    if (message.botDifficulty) {
+      seat.botDifficulty = message.botDifficulty;
     }
+    if (!matchedByToken || wasClaimed) {
+      seat.token = this.newToken();
+    }
+    this.strikes.delete(transport);
     const welcome: WelcomeMessage = {
       type: "welcome",
       protocol: PROTOCOL_VERSION,
       contentHash: this.content.contentHash,
       seat: seat.playerId,
       token: seat.token,
+      resumeSeq: seat.lastIntentSeq,
       lobby: !this.started,
       players: this.seatInfos(),
       chat: this.chatHistory.slice(-20),
+      recentEvents: [...this.recentEvents],
     };
     this.sendTo(transport, welcome);
     if (this.startedGame) {
@@ -295,7 +362,7 @@ export class HostSession {
     try {
       const result = reduce(this.state, action, this.content);
       this.state = result.state;
-      this.pendingEvents.push(...result.events);
+      this.stashEvents(result.events);
     } catch (error) {
       if (error instanceof EngineError) {
         return { ok: false, error: error.message };
@@ -339,17 +406,24 @@ export class HostSession {
     if (!seat) {
       return;
     }
+    const now = this.options.now();
+    seat.emoteTimes = seat.emoteTimes.filter((time) => now - time < 60000);
+    if (seat.emoteTimes.length >= this.options.emoteLimitPerMinute) {
+      return;
+    }
+    seat.emoteTimes.push(now);
     const broadcast: EmoteBroadcast = {
       type: "emote",
       fromId: seat.playerId,
       fromName: seat.name,
       emoteId,
-      at: this.options.now(),
+      at: now,
     };
     this.broadcast(broadcast);
   }
 
   private handleClose(transport: Transport): void {
+    this.strikes.delete(transport);
     const seat = this.seatForTransport(transport);
     if (!seat) {
       return;
@@ -385,12 +459,13 @@ export class HostSession {
         characterId: seat.characterId as typeof template.characterId,
         tokenId: seat.tokenId,
         isBot: seat.isBot,
+        botDifficulty: seat.botDifficulty,
       };
     });
     const started = bootstrapGame({ ...this.setup, players }, this.content);
     this.state = started.state;
     this.started = true;
-    this.pendingEvents.push(...started.events);
+    this.stashEvents(started.events);
     this.broadcastUpdate();
   }
 
@@ -410,10 +485,31 @@ export class HostSession {
     );
   }
 
+  private maintainLiveness(now: number): void {
+    for (const seat of this.seats) {
+      if (seat.isBot || !seat.claimed || !seat.transport || !seat.connected) {
+        continue;
+      }
+      if (now - seat.lastPingAt >= this.options.pingIntervalMs) {
+        seat.lastPingAt = now;
+        this.sendTo(seat.transport, { type: "ping", t: now });
+      }
+      if (now - seat.lastPongAt > this.options.livenessTimeoutMs) {
+        const transport = seat.transport;
+        seat.transport = null;
+        seat.connected = false;
+        seat.disconnectedAt = now;
+        this.broadcastSeats();
+        transport.close();
+      }
+    }
+  }
+
   tick(now: number = this.options.now()): boolean {
     if (!this.startedGame || !this.state || this.state.phase === "finished") {
       return false;
     }
+    this.maintainLiveness(now);
     const pending = this.state.pending;
     const actorId = pending
       ? pending.playerId
@@ -428,7 +524,7 @@ export class HostSession {
     try {
       const result = reduce(this.state, action, this.content);
       this.state = result.state;
-      this.pendingEvents.push(...result.events);
+      this.stashEvents(result.events);
     } catch {
       return false;
     }
