@@ -1,0 +1,74 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Noto Serif SC", "Source Han Serif SC", "STSong", "SimSun", serif;
+  --font-body: system-ui, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+
+  --color-ink-950: #0b1118;
+  --color-ink-900: #111a23;
+  --color-ink-800: #1a2632;
+  --color-ink-700: #243444;
+  --color-ink-600: #33475c;
+  --color-paper-50: #fdf8ec;
+  --color-paper-100: #f6ecd6;
+  --color-paper-200: #ecd9b4;
+  --color-gold-300: #f0d68a;
+  --color-gold-400: #e0b64f;
+  --color-gold-500: #c9a227;
+  --color-cinnabar-500: #c0392b;
+  --color-cinnabar-600: #a63a2f;
+  --color-jade-500: #3aa07d;
+
+  --shadow-panel: 0 18px 50px -18px rgba(4, 8, 14, 0.85);
+  --shadow-gold: 0 0 0 1px rgba(224, 182, 79, 0.35), 0 10px 30px -12px rgba(224, 182, 79, 0.45);
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: radial-gradient(1200px 800px at 50% -10%, #1d2c3d 0%, var(--color-ink-950) 55%),
+    var(--color-ink-950);
+  color: var(--color-paper-50);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+.panel {
+  background: linear-gradient(180deg, rgba(38, 54, 72, 0.9), rgba(20, 30, 42, 0.92));
+  border: 1px solid rgba(224, 182, 79, 0.22);
+  border-radius: 1rem;
+  box-shadow: var(--shadow-panel);
+}
+
+.gold-text {
+  background: linear-gradient(180deg, #f6e2a5 0%, #e0b64f 45%, #b3861f 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(224, 182, 79, 0.35);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(224, 182, 79, 0.55);
+}
