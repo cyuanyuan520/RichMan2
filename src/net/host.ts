@@ -48,7 +48,6 @@ interface HostSeat {
   chatTimes: number[];
   emoteTimes: number[];
   lastPingAt: number;
-  lastPongAt: number;
   awaitingPong: boolean;
   unansweredSince: number;
   lastPingReplyAt: number;
@@ -111,7 +110,6 @@ export class HostSession {
         chatTimes: [],
         emoteTimes: [],
         lastPingAt: 0,
-        lastPongAt: 0,
         awaitingPong: false,
         unansweredSince: 0,
         lastPingReplyAt: 0,
@@ -205,7 +203,6 @@ export class HostSession {
       case "pong": {
         const seat = this.seatForTransport(transport);
         if (seat) {
-          seat.lastPongAt = this.options.now();
           seat.awaitingPong = false;
           seat.unansweredSince = 0;
         }
@@ -295,7 +292,6 @@ export class HostSession {
     seat.connected = true;
     seat.disconnectedAt = null;
     seat.lastPingAt = now;
-    seat.lastPongAt = now;
     seat.awaitingPong = false;
     seat.unansweredSince = 0;
     seat.name = message.name;
