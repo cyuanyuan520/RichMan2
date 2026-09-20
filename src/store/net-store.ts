@@ -17,13 +17,21 @@ import { HostSession } from "@/net/host";
 import { ClientSession } from "@/net/client";
 import { PROTOCOL_VERSION, type SeatInfo, type EmoteId } from "@/net/protocol";
 import { toIntent } from "@/net/intent";
-import { connectRoom, createRoomPeer, peerTransport, randomRoomCode, waitForPeerOpen } from "@/net/peer-transport";
 import {
   applyRemoteSnapshot,
   cancelPendingBotTimer,
   setOnlineDispatcher,
   useGameStore,
 } from "./game-store";
+
+type PeerTransportModule = typeof import("@/net/peer-transport");
+
+let peerTransportModule: Promise<PeerTransportModule> | null = null;
+
+function loadPeerTransport(): Promise<PeerTransportModule> {
+  peerTransportModule ??= import("@/net/peer-transport");
+  return peerTransportModule;
+}
 
 export type NetRole = "host" | "client";
 export type NetStatus = "idle" | "connecting" | "lobby" | "playing" | "error" | "closed";
@@ -238,10 +246,9 @@ export const useNetStore = create<NetStore>((set, get) => ({
   createRoom: () => {
     teardown();
     const config = get().lobbyConfig;
-    const code = randomRoomCode();
     set({
       role: "host",
-      roomCode: code,
+      roomCode: null,
       status: "connecting",
       error: null,
       retryable: false,
@@ -256,32 +263,46 @@ export const useNetStore = create<NetStore>((set, get) => ({
       onSeatsChange: () => set({ seats: host?.seatInfos() ?? [] }),
     });
     host = session;
-    const roomPeer = createRoomPeer(code);
-    peer = roomPeer;
-    roomPeer.on("connection", (connection) => {
-      connections.push(connection);
-      session.connect(peerTransport(connection));
-    });
-    roomPeer.on("error", (error) => {
-      const message = String((error as Error)?.message ?? error);
-      if (message.includes("is taken") || message.includes("unavailable-id")) {
-        set({ status: "error", error: "房间号冲突，请重试" });
-        teardown();
-        return;
-      }
-      set({ status: "error", error: message });
-    });
-    void waitForPeerOpen(roomPeer)
-      .then(() => {
-        set({ status: "lobby", seats: session.seatInfos() });
-        tickTimer = setInterval(() => {
-          session.tick();
-        }, 500);
+    void loadPeerTransport()
+      .then(({ createRoomPeer, peerTransport, randomRoomCode, waitForPeerOpen }) => {
+        if (host !== session) {
+          return;
+        }
+        const code = randomRoomCode();
+        set({ roomCode: code });
+        const roomPeer = createRoomPeer(code);
+        peer = roomPeer;
+        roomPeer.on("connection", (connection) => {
+          connections.push(connection);
+          session.connect(peerTransport(connection));
+        });
+        roomPeer.on("error", (error) => {
+          const message = String((error as Error)?.message ?? error);
+          if (message.includes("is taken") || message.includes("unavailable-id")) {
+            set({ status: "error", error: "房间号冲突，请重试" });
+            teardown();
+            return;
+          }
+          set({ status: "error", error: message });
+        });
+        return waitForPeerOpen(roomPeer)
+          .then(() => {
+            set({ status: "lobby", seats: session.seatInfos() });
+            tickTimer = setInterval(() => {
+              session.tick();
+            }, 500);
+          })
+          .catch((error: unknown) => {
+            set({
+              status: "error",
+              error: error instanceof Error ? error.message : "无法连接信令服务器",
+            });
+          });
       })
       .catch((error: unknown) => {
         set({
           status: "error",
-          error: error instanceof Error ? error.message : "无法连接信令服务器",
+          error: error instanceof Error ? error.message : "无法加载联机模块",
         });
       });
 
@@ -435,8 +456,10 @@ export const useNetStore = create<NetStore>((set, get) => ({
       },
     });
     client = session;
-    void connectRoom(code)
-      .then(({ connection, peer: roomPeer }) => {
+    void loadPeerTransport()
+      .then(async (transportModule) => ({ module: transportModule, room: await transportModule.connectRoom(code) }))
+      .then(({ module, room }) => {
+        const { connection, peer: roomPeer } = room;
         if (generation !== sessionGeneration) {
           try {
             connection.close();
@@ -447,7 +470,7 @@ export const useNetStore = create<NetStore>((set, get) => ({
           return;
         }
         clientPeer = roomPeer;
-        session.connect(peerTransport(connection), {
+        session.connect(module.peerTransport(connection), {
           name: settings.playerName,
           protocol: PROTOCOL_VERSION,
           engine: STATE_VERSION,

@@ -13,7 +13,7 @@ const groups: GroupDef[] = [
 ];
 
 const theme: MapTheme = {
-  backgroundImage: "/assets/maps/china-journey.png",
+  backgroundImage: "/assets/maps/china-journey.webp",
   backgroundSize: "cover",
   boardArea: { top: 0, left: 0, width: 100, height: 100 },
   accent: "#c0392b",

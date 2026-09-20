@@ -13,7 +13,7 @@ const groups: GroupDef[] = [
 ];
 
 const theme: MapTheme = {
-  backgroundImage: "/assets/maps/nostalgia-table.png",
+  backgroundImage: "/assets/maps/nostalgia-table.webp",
   backgroundSize: "cover",
   boardArea: { top: 13, left: 15, width: 70, height: 74 },
   accent: "#d98f3d",

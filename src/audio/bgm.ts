@@ -29,6 +29,19 @@ function ensureElement(): HTMLAudioElement | null {
   return element;
 }
 
+function requestPlayback(audio: HTMLAudioElement): void {
+  try {
+    const pending = audio.play();
+    if (pending && typeof pending.catch === "function") {
+      void pending.catch(() => {
+        // Autoplay policy: the track starts after the first user gesture.
+      });
+    }
+  } catch {
+    // Some environments throw synchronously instead of rejecting.
+  }
+}
+
 export function playBgm(track: BgmTrack): void {
   const audio = ensureElement();
   if (!audio) {
@@ -41,9 +54,7 @@ export function playBgm(track: BgmTrack): void {
   }
   audio.volume = volume;
   if (volume > 0) {
-    void audio.play().catch(() => {
-      // Autoplay policy: the track starts after the first user gesture.
-    });
+    requestPlayback(audio);
   }
 }
 
@@ -57,7 +68,7 @@ export function applyBgmVolume(): void {
   if (volume <= 0) {
     audio.pause();
   } else if (current && audio.paused) {
-    void audio.play().catch(() => {});
+    requestPlayback(audio);
   }
 }
 
