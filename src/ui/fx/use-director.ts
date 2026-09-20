@@ -18,16 +18,28 @@ export interface CardDisplay {
   playerId: PlayerId;
 }
 
+export interface BannerDisplay {
+  icon: string;
+  title: string;
+  detail?: string;
+  tone: "gold" | "good" | "bad" | "info";
+}
+
 export interface DirectorState {
   display: Record<PlayerId, number>;
   dice: DiceDisplay | null;
   floaters: Floater[];
   card: CardDisplay | null;
-  banner: string | null;
+  banner: BannerDisplay | null;
   busy: boolean;
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function playerName(id: PlayerId): string {
+  const player = useGameStore.getState().game?.players.find((entry) => entry.id === id);
+  return player?.name ?? "玩家";
+}
 
 export function useDirector(): DirectorState {
   const game = useGameStore((state) => state.game);
@@ -37,7 +49,7 @@ export function useDirector(): DirectorState {
   const [dice, setDice] = useState<DiceDisplay | null>(null);
   const [floaters, setFloaters] = useState<Floater[]>([]);
   const [card, setCard] = useState<CardDisplay | null>(null);
-  const [banner, setBanner] = useState<string | null>(null);
+  const [banner, setBanner] = useState<BannerDisplay | null>(null);
   const [busy, setBusy] = useState(false);
 
   const floaterSeq = useRef(0);
@@ -120,7 +132,7 @@ export function useDirector(): DirectorState {
             pushFloater(event.playerId, event.delta);
             playSfx(event.delta > 0 ? "money-in" : "money-out");
           }
-          await sleep(180);
+          await sleep(420);
           return;
         }
         case "card-drawn": {
@@ -151,22 +163,42 @@ export function useDirector(): DirectorState {
         case "jailed":
         case "hospitalized": {
           playSfx("jail");
-          setBanner(event.type === "jailed" ? "⛓️ 入狱" : "🏥 住院");
+          const who = playerName(event.playerId);
+          setBanner(
+            event.type === "jailed"
+              ? {
+                  icon: "⛓️",
+                  title: `${who} 入狱`,
+                  detail: `暂停行动 ${event.turns} 回合 · 可缴纳保释金提前出狱`,
+                  tone: "bad",
+                }
+              : {
+                  icon: "🏥",
+                  title: `${who} 住院`,
+                  detail: `需要休养 ${event.turns} 回合`,
+                  tone: "bad",
+                },
+          );
           const player = useGameStore
             .getState()
             .game?.players.find((entry) => entry.id === event.playerId);
           if (player) {
             setDisplay((current) => ({ ...current, [player.id]: player.position }));
           }
-          await sleep(620);
+          await sleep(1200);
           if (live()) {
             setBanner(null);
           }
           return;
         }
         case "released": {
-          setBanner("🕊️ 恢复自由");
-          await sleep(520);
+          setBanner({
+            icon: "🕊️",
+            title: `${playerName(event.playerId)} 恢复自由`,
+            detail: event.from === "jail" ? "可以继续正常行动" : "康复出院",
+            tone: "good",
+          });
+          await sleep(900);
           if (live()) {
             setBanner(null);
           }
@@ -174,8 +206,13 @@ export function useDirector(): DirectorState {
         }
         case "player-bankrupt": {
           playSfx("jail");
-          setBanner("💀 破产出局");
-          await sleep(900);
+          setBanner({
+            icon: "💀",
+            title: `${playerName(event.playerId)} 破产出局`,
+            detail: "名下资产已清算",
+            tone: "bad",
+          });
+          await sleep(1500);
           if (live()) {
             setBanner(null);
           }
@@ -183,8 +220,13 @@ export function useDirector(): DirectorState {
         }
         case "game-ended": {
           playSfx("win");
-          setBanner("🏆 对局结束");
-          await sleep(800);
+          setBanner({
+            icon: "🏆",
+            title: `${playerName(event.winnerId)} 获得胜利`,
+            detail: "查看最终排名",
+            tone: "gold",
+          });
+          await sleep(1400);
           if (live()) {
             setBanner(null);
           }
@@ -200,7 +242,7 @@ export function useDirector(): DirectorState {
           return;
         }
         default:
-          await sleep(90);
+          await sleep(150);
       }
     };
 

@@ -50,6 +50,7 @@ interface GameStore {
   status: GameStatus;
   fxQueue: GameEvent[];
   log: LogEntry[];
+  logReadCount: number;
   animating: boolean;
   toast: { id: number; text: string; tone: LogTone } | null;
 
@@ -57,6 +58,7 @@ interface GameStore {
   dispatch: (action: GameAction) => { ok: boolean; error?: string };
   setAnimating: (value: boolean) => void;
   shiftFx: () => GameEvent | undefined;
+  markLogRead: () => void;
   notify: (text: string, tone?: LogTone) => void;
   clearToast: () => void;
   backToMenu: () => void;
@@ -148,7 +150,8 @@ export const useGameStore = create<GameStore>((set, get) => {
       if (generation !== botGeneration) {
         return;
       }
-      const { game, content, mode } = get();
+      const state = get();
+      const { game, content, mode } = state;
       if (!game || !content || mode === "menu") {
         return;
       }
@@ -159,6 +162,11 @@ export const useGameStore = create<GameStore>((set, get) => {
       const actorId = game.pending ? game.pending.playerId : currentPlayer(game).id;
       const actor = game.players.find((player) => player.id === actorId);
       if (!actor?.isBot) {
+        return;
+      }
+      if (state.animating) {
+        // Let the current animation play out so players can follow the action.
+        botTimer = setTimeout(step, 150);
         return;
       }
       const action = chooseAiAction(game, content, actorId);
@@ -199,6 +207,7 @@ export const useGameStore = create<GameStore>((set, get) => {
     status: "idle",
     fxQueue: [],
     log: [],
+    logReadCount: 0,
     animating: false,
     toast: null,
 
@@ -217,6 +226,7 @@ export const useGameStore = create<GameStore>((set, get) => {
         lastSetup: setup,
         status: "playing",
         fxQueue: events,
+        logReadCount: 0,
         log: [
           {
             id: logSeq,
@@ -274,6 +284,10 @@ export const useGameStore = create<GameStore>((set, get) => {
       return head;
     },
 
+    markLogRead: () => {
+      set({ logReadCount: get().log.length });
+    },
+
     notify: (text, tone = "info") => {
       toastSeq += 1;
       set({ toast: { id: toastSeq, text, tone } });
@@ -291,6 +305,7 @@ export const useGameStore = create<GameStore>((set, get) => {
         status: "idle",
         fxQueue: [],
         log: [],
+        logReadCount: 0,
         animating: false,
         toast: null,
       });

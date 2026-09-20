@@ -53,6 +53,14 @@ export function Board(props: BoardProps) {
     return grouped;
   }, [state.players, props.display]);
 
+  const names = useMemo(() => {
+    const map: Record<PlayerId, string> = {};
+    for (const player of state.players) {
+      map[player.id] = player.name;
+    }
+    return map;
+  }, [state.players]);
+
   const inspectDef = inspect !== null ? state.tileDefs[inspect] : undefined;
   const inspectTile = inspect !== null ? state.tiles[inspect] : undefined;
 
@@ -87,14 +95,43 @@ export function Board(props: BoardProps) {
       {map.layout === "ring" ? (
         <div className="absolute inset-0 flex items-center justify-center p-2">
           <div
-            className="relative grid h-full max-h-[calc(100vh-6.5rem)] w-full max-w-[min(100%,calc(100vh-6.5rem))] gap-1 rounded-[2rem] border p-2 shadow-[0_40px_120px_-50px_rgba(0,0,0,0.95)]"
+            className="relative h-full max-h-[calc(100vh-6.5rem)] w-full max-w-[min(100%,calc(100vh-6.5rem))] rounded-[2rem] border p-2.5 shadow-[0_40px_120px_-50px_rgba(0,0,0,0.95)]"
             style={{
               borderColor: map.theme.boardBorder,
               background: `${map.theme.boardBg}f2`,
-              gridTemplateColumns: ringGridTemplate,
-              gridTemplateRows: ringGridTemplate,
             }}
           >
+            <div
+              className="pointer-events-none absolute inset-1.5 rounded-[1.65rem] border"
+              style={{ borderColor: `${map.theme.accent}2e` }}
+            />
+            {(
+              [
+                ["left-2 top-2", "rotate-0"],
+                ["right-2 top-2", "rotate-90"],
+                ["right-2 bottom-2", "rotate-180"],
+                ["left-2 bottom-2", "-rotate-90"],
+              ] as Array<[string, string]>
+            ).map(([position, rotation]) => (
+              <span
+                key={position}
+                className={cn(
+                  "pointer-events-none absolute text-[11px] leading-none",
+                  position,
+                  rotation,
+                )}
+                style={{ color: `${map.theme.accent}aa` }}
+              >
+                ◆
+              </span>
+            ))}
+            <div
+              className="relative grid h-full w-full gap-1"
+              style={{
+                gridTemplateColumns: ringGridTemplate,
+                gridTemplateRows: ringGridTemplate,
+              }}
+            >
             {state.tileDefs.map((def, index) => {
               const spot = ringSpot(index);
               const tile = state.tiles[index];
@@ -117,26 +154,30 @@ export function Board(props: BoardProps) {
                     {...ownerOf(tile.ownerId)}
                   />
                   {here.length > 0 ? (
-                    <div className="absolute inset-x-0.5 bottom-0.5 z-10 flex flex-wrap justify-center gap-0.5">
-                      {state.players
-                        .filter((player) => here.includes(player.id))
-                        .map((player) => (
-                          <motion.div
-                            key={player.id}
-                            layout
-                            initial={{ scale: 0.4, opacity: 0 }}
-                            animate={{ scale: 1, opacity: 1 }}
-                            transition={{ type: "spring", stiffness: 420, damping: 28 }}
-                          >
-                            <TokenBubble
-                              player={player}
-                              skin={props.skins[player.id] ?? { color: "#e0b64f", avatar: "", icon: "●" }}
-                              size="sm"
-                              active={player.id === props.activePlayerId}
-                              onClick={() => props.onTokenClick?.(player.id)}
-                            />
-                          </motion.div>
-                        ))}
+                    <div className="absolute inset-x-0.5 bottom-0.5 z-10 flex justify-center">
+                      <div className="flex -space-x-1.5">
+                        {state.players
+                          .filter((player) => here.includes(player.id))
+                          .map((player) => (
+                            <motion.div
+                              key={player.id}
+                              layout
+                              initial={{ scale: 0.4, opacity: 0 }}
+                              animate={{ scale: 1, opacity: 1 }}
+                              transition={{ type: "spring", stiffness: 420, damping: 28 }}
+                              className="relative"
+                            >
+                              <TokenBubble
+                                player={player}
+                                skin={props.skins[player.id] ?? { color: "#e0b64f", avatar: "", icon: "●" }}
+                                size={here.length >= 3 ? "sm" : "md"}
+                                active={player.id === props.activePlayerId}
+                                showName={player.id === props.activePlayerId && here.length < 3}
+                                onClick={() => props.onTokenClick?.(player.id)}
+                              />
+                            </motion.div>
+                          ))}
+                      </div>
                     </div>
                   ) : null}
                 </div>
@@ -151,6 +192,7 @@ export function Board(props: BoardProps) {
             <FloaterLayer
               floaters={props.floaters ?? []}
               display={props.display}
+              names={names}
               spot={(index) => {
                 const spot = ringSpot(index);
                 return {
@@ -159,6 +201,7 @@ export function Board(props: BoardProps) {
                 };
               }}
             />
+            </div>
           </div>
           {tooltip}
         </div>
@@ -166,6 +209,7 @@ export function Board(props: BoardProps) {
         <PathBoard
           {...props}
           playersByTile={playersByTile}
+          names={names}
           setInspect={setInspect}
           tooltip={tooltip}
         />
@@ -177,10 +221,12 @@ export function Board(props: BoardProps) {
 function FloaterLayer({
   floaters,
   display,
+  names,
   spot,
 }: {
   floaters: Floater[];
   display: Record<PlayerId, number>;
+  names: Record<PlayerId, string>;
   spot: (index: number) => { left: string; top: string };
 }) {
   return (
@@ -190,19 +236,22 @@ function FloaterLayer({
         return (
           <motion.span
             key={floater.id}
-            initial={{ opacity: 0, y: 10, scale: 0.8 }}
-            animate={{ opacity: [0, 1, 1, 0], y: -40, scale: 1 }}
-            transition={{ duration: 1.15, times: [0, 0.15, 0.62, 1], ease: "easeOut" }}
+            initial={{ opacity: 0, y: 14, scale: 0.7 }}
+            animate={{ opacity: [0, 1, 1, 0], y: -52, scale: 1 }}
+            transition={{ duration: 1.5, times: [0, 0.12, 0.66, 1], ease: "easeOut" }}
             className={cn(
-              "absolute -translate-x-1/2 rounded-full px-2 py-0.5 text-sm font-semibold shadow-lg",
+              "absolute -translate-x-1/2 whitespace-nowrap rounded-full border px-2.5 py-1 text-base font-semibold shadow-xl backdrop-blur-sm",
               floater.delta >= 0
-                ? "bg-jade-500/90 text-paper-50"
-                : "bg-cinnabar-500/90 text-paper-50",
+                ? "border-emerald-200/50 bg-jade-600/92 text-paper-50"
+                : "border-rose-200/50 bg-cinnabar-600/92 text-paper-50",
             )}
             style={position}
           >
-            {floater.delta >= 0 ? "+" : ""}
-            {Math.round(floater.delta).toLocaleString("zh-CN")}
+            <span className="mr-1 text-[11px] font-normal opacity-85">
+              {names[floater.playerId] ?? ""}
+            </span>
+            {floater.delta >= 0 ? "+" : "-"}¥
+            {Math.abs(Math.round(floater.delta)).toLocaleString("zh-CN")}
           </motion.span>
         );
       })}
@@ -222,10 +271,12 @@ function PathBoard({
   onTokenClick,
   floaters,
   playersByTile,
+  names,
   setInspect,
   tooltip,
 }: BoardProps & {
   playersByTile: Record<number, PlayerId[]>;
+  names: Record<PlayerId, string>;
   setInspect: (value: number | null) => void;
   tooltip: React.ReactNode;
 }) {
@@ -290,6 +341,7 @@ function PathBoard({
         <FloaterLayer
           floaters={floaters ?? []}
           display={display}
+          names={names}
           spot={(index) => {
             const coord = map.tiles[index]?.coord ?? { x: 50, y: 50 };
             return { left: `${coord.x}%`, top: `${coord.y}%` };

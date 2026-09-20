@@ -20,20 +20,22 @@ export function TokenBubble({
   skin,
   active,
   size = "md",
+  showName,
   onClick,
 }: {
   player: Player;
   skin: TokenSkin;
   active?: boolean;
   size?: "sm" | "md" | "lg";
+  showName?: boolean;
   onClick?: () => void;
 }) {
   const sizeClass =
     size === "lg"
-      ? "h-9 w-9 text-lg"
+      ? "h-10 w-10 text-lg"
       : size === "sm"
-        ? "h-5 w-5 text-[10px]"
-        : "h-7 w-7 text-sm";
+        ? "h-6 w-6 text-[11px]"
+        : "h-8 w-8 text-sm";
   return (
     <button
       type="button"
@@ -47,7 +49,15 @@ export function TokenBubble({
       )}
       style={{ background: skin.color, borderColor: "#0b1118" }}
     >
-      <span>{skin.icon}</span>
+      {active ? (
+        <span className="pointer-events-none absolute -inset-1 animate-ping rounded-full border-2 border-gold-300/60" />
+      ) : null}
+      <span className="leading-none">{skin.icon}</span>
+      {showName ? (
+        <span className="pointer-events-none absolute -top-4 left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-ink-950/90 px-1 text-[9px] leading-tight text-paper-50">
+          {player.name}
+        </span>
+      ) : null}
       {player.status !== "active" ? (
         <span className="absolute -top-2 -right-1 text-[10px]">
           {STATUS_BADGE[player.status]}

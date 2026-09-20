@@ -31,6 +31,22 @@ export function BuyPropertyDialog({
   const group = def.group
     ? content.map.groups.find((entry) => entry.id === def.group)
     : undefined;
+  const economy = state.config.economy;
+  const rentCells: Array<[string, string]> =
+    def.kind === "transport"
+      ? economy.transportRents.map((rent, index) => [
+          `持有 ${index + 1} 处`,
+          formatMoney(rent),
+        ])
+      : def.kind === "utility"
+        ? economy.utilityMultipliers.map((multiplier, index) => [
+            `持有 ${index + 1} 处`,
+            `点数 ×${multiplier}`,
+          ])
+        : [
+            ["基础租金", formatMoney(def.rents?.[0] ?? 0)],
+            ["满级租金", formatMoney(def.rents?.[def.rents.length - 1] ?? 0)],
+          ];
   return (
     <Modal open>
       <div className="space-y-4 p-6">
@@ -41,24 +57,22 @@ export function BuyPropertyDialog({
         <div className="rounded-2xl border border-gold-400/25 bg-gold-500/[0.07] p-4">
           <p className="font-display text-2xl text-gold-300">{def.name}</p>
           <p className="mt-1 text-xs text-paper-200/80">{def.desc}</p>
-          <div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
+          <div
+            className="mt-3 grid gap-2 text-center text-xs"
+            style={{ gridTemplateColumns: `repeat(${rentCells.length + 1}, minmax(0, 1fr))` }}
+          >
             <span className="rounded-lg bg-white/5 py-1.5">
               地价
               <br />
               <b className="text-paper-50">{formatMoney(pending.price)}</b>
             </span>
-            <span className="rounded-lg bg-white/5 py-1.5">
-              基础租金
-              <br />
-              <b className="text-paper-50">{formatMoney(def.rents?.[0] ?? 0)}</b>
-            </span>
-            <span className="rounded-lg bg-white/5 py-1.5">
-              满级租金
-              <br />
-              <b className="text-paper-50">
-                {formatMoney(def.rents?.[def.rents.length - 1] ?? 0)}
-              </b>
-            </span>
+            {rentCells.map(([label, value]) => (
+              <span key={label} className="rounded-lg bg-white/5 py-1.5">
+                {label}
+                <br />
+                <b className="text-paper-50">{value}</b>
+              </span>
+            ))}
           </div>
         </div>
         <div className="flex justify-end gap-2">

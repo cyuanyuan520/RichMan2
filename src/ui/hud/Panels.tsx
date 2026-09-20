@@ -12,7 +12,7 @@ import type {
 } from "@/game/core/types";
 import { netWorth } from "@/game/core/reducer";
 import { formatMoney } from "@/lib/format";
-import { Chip, SectionTitle } from "@/ui/components/primitives";
+import { Chip } from "@/ui/components/primitives";
 import { cn } from "@/lib/format";
 import type { LogEntry } from "@/store/game-store";
 import type { DiceDisplay } from "@/ui/fx/use-director";
@@ -39,65 +39,139 @@ export function CenterPanel({
   const actor = state.players.find((player) => player.id === actorId);
   const character = actor ? content.characters[actor.characterId] : null;
   const tile = state.tileDefs[actor?.position ?? 0] as TileDef | undefined;
+  const theme = content.map.theme;
   const standings = [...state.players].sort(
     (a, b) => netWorth(state, b.id) - netWorth(state, a.id),
   );
+  const maxWorth = Math.max(1, ...standings.map((player) => Math.max(0, netWorth(state, player.id))));
+  const phaseLabel =
+    state.phase === "await-roll"
+      ? "等待掷骰"
+      : state.phase === "await-decision"
+        ? "等待决策"
+        : state.phase === "action-window"
+          ? "行动阶段"
+          : "对局结束";
+  const thinking = Boolean(actor?.isBot) && state.phase !== "finished" && actor?.status === "active";
 
   return (
-    <div className="flex h-full flex-col items-center justify-between gap-3 p-5">
-      <div className="text-center">
-        <SectionTitle>第 {state.round} 回合</SectionTitle>
-        <p className="mt-1 font-display text-2xl text-gold-300">
-          {content.map.name}
-        </p>
+    <div className="relative flex h-full flex-col items-center justify-between gap-2 p-4">
+      <span
+        aria-hidden
+        className="pointer-events-none absolute inset-0 grid place-items-center font-display text-[10rem] leading-none text-white/[0.035]"
+      >
+        {content.map.name.slice(0, 1)}
+      </span>
+
+      <div className="relative z-10 flex w-full items-center justify-between gap-2">
+        <div className="flex items-center gap-2.5">
+          <span
+            className="grid h-10 w-10 place-items-center rounded-2xl border font-display text-lg"
+            style={{ borderColor: `${theme.accent}66`, background: `${theme.accent}18`, color: theme.accent }}
+          >
+            {content.map.name.slice(0, 1)}
+          </span>
+          <div>
+            <p className="font-display text-lg leading-tight text-gold-300">{content.map.name}</p>
+            <p className="text-[11px] text-paper-200/60">
+              第 {state.round} 回合
+              {state.config.targetRounds > 0 ? ` / ${state.config.targetRounds}` : ""}
+            </p>
+          </div>
+        </div>
+        <span
+          className="rounded-full border px-3 py-1 text-[11px]"
+          style={{ borderColor: `${theme.accent}44`, background: `${theme.accent}14`, color: theme.accent }}
+        >
+          {phaseLabel}
+        </span>
       </div>
 
-      <div className="flex flex-col items-center gap-2">
-        <div className="flex items-center gap-3">
+      <div className="relative z-10 flex flex-col items-center gap-2">
+        <div className="flex items-center gap-4 rounded-3xl border border-gold-400/25 bg-ink-950/55 px-6 py-3 shadow-[inset_0_2px_18px_rgba(0,0,0,0.6)]">
           <Die value={dice?.dice[0]} rolling={dice?.rolling} />
           <Die value={dice?.dice[1]} rolling={dice?.rolling} />
+          <div className="w-24 text-left">
+            {dice ? (
+              <>
+                <p className="font-display text-2xl leading-tight text-gold-200">
+                  {dice.dice[0] + dice.dice[1]}
+                </p>
+                <p className="text-[10px] text-paper-200/70">
+                  {dice.dice[0] === dice.dice[1] ? "双数 · 再掷一次" : `前进 ${dice.dice[0] + dice.dice[1]} 格`}
+                </p>
+              </>
+            ) : (
+              <p className="text-[11px] text-paper-200/50">等待掷骰</p>
+            )}
+          </div>
         </div>
         {actor ? (
-          <div className="flex items-center gap-2 text-sm text-paper-100">
-            <span className="text-lg">{character?.avatar ?? "🎲"}</span>
-            <span className="font-display">
+          <div
+            className="flex items-center gap-2 rounded-full border px-3 py-1 text-sm"
+            style={{ borderColor: `${theme.accent}55`, background: `${theme.accent}12` }}
+          >
+            <span className="text-lg leading-none">{character?.avatar ?? "🎲"}</span>
+            <span className="font-display text-paper-50">
               {actor.name}
-              {actor.id === localPlayerId ? "（你）" : ""}
+              {actor.id === localPlayerId ? "（你）" : actor.isBot ? "（AI）" : ""}
             </span>
-            <span className="text-xs text-paper-200/70">
-              {actor.status === "active" ? tile?.name : actor.status === "jailed" ? "监禁中" : actor.status === "hospitalized" ? "住院中" : "已出局"}
+            <span className="text-xs text-paper-200/75">
+              {actor.status === "active"
+                ? tile?.name
+                : actor.status === "jailed"
+                  ? "监禁中"
+                  : actor.status === "hospitalized"
+                    ? "住院中"
+                    : "已出局"}
             </span>
+            {thinking && !dice?.rolling ? (
+              <motion.span
+                className="text-[11px] text-gold-200/80"
+                animate={{ opacity: [0.35, 1, 0.35] }}
+                transition={{ duration: 1.4, repeat: Infinity }}
+              >
+                思考中…
+              </motion.span>
+            ) : null}
           </div>
         ) : null}
-        <p className="text-[11px] tracking-[0.25em] text-paper-200/50">
-          {state.phase === "await-roll"
-            ? "等待掷骰"
-            : state.phase === "await-decision"
-              ? "等待决策"
-              : state.phase === "action-window"
-                ? "行动阶段"
-                : "对局结束"}
-        </p>
       </div>
 
-      <div className="w-full max-w-sm space-y-1.5">
-        <SectionTitle className="text-center">资产排行</SectionTitle>
-        {standings.map((player, index) => (
-          <div
-            key={player.id}
-            className={cn(
-              "flex items-center justify-between rounded-lg px-2.5 py-1 text-xs",
-              player.id === actorId ? "bg-gold-500/12" : "bg-white/[0.03]",
-            )}
-          >
-            <span className="flex items-center gap-2 text-paper-100">
-              <span className="w-4 text-center text-paper-200/60">{index + 1}</span>
-              <span>{player.name}</span>
+      <div className="relative z-10 w-full max-w-sm space-y-1">
+        <p className="text-center text-[10px] tracking-[0.3em] text-paper-200/45">资产排行</p>
+        {standings.map((player, index) => {
+          const worth = netWorth(state, player.id);
+          const characterOf = content.characters[player.characterId];
+          return (
+            <div
+              key={player.id}
+              className={cn(
+                "flex items-center gap-2 rounded-lg px-2.5 py-1 text-xs",
+                player.id === actorId ? "bg-gold-500/12" : "bg-white/[0.03]",
+              )}
+            >
+              <span
+                className={cn(
+                  "grid h-4 w-4 shrink-0 place-items-center rounded text-[9px]",
+                  index === 0 ? "bg-gold-400 text-ink-950" : "bg-white/10 text-paper-200/70",
+                )}
+              >
+                {index + 1}
+              </span>
+              <span className="shrink-0 text-sm leading-none">{characterOf?.avatar ?? "🎲"}</span>
+              <span className="max-w-[5.5rem] truncate text-paper-100">{player.name}</span>
               {player.status === "bankrupt" ? <Chip color="#c0392b">出局</Chip> : null}
-            </span>
-            <span className="text-gold-300">{formatMoney(netWorth(state, player.id))}</span>
-          </div>
-        ))}
+              <span className="ml-auto text-gold-300">{formatMoney(worth)}</span>
+              <span className="h-1.5 w-14 shrink-0 overflow-hidden rounded-full bg-white/8">
+                <span
+                  className="block h-full rounded-full"
+                  style={{ width: `${Math.max(4, (Math.max(0, worth) / maxWorth) * 100)}%`, background: theme.accent }}
+                />
+              </span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -108,7 +182,7 @@ function Die({ value, rolling }: { value?: number; rolling?: boolean }) {
     <motion.span
       animate={rolling ? { rotate: [0, 14, -12, 8, 0], scale: [1, 1.12, 1] } : { rotate: 0, scale: 1 }}
       transition={{ duration: 0.45 }}
-      className="grid h-14 w-14 place-items-center rounded-2xl border border-gold-400/40 bg-gradient-to-b from-paper-50 to-paper-200 font-display text-2xl text-ink-900 shadow-[0_12px_30px_-14px_rgba(0,0,0,0.9)]"
+      className="grid h-16 w-16 place-items-center rounded-2xl border border-gold-400/45 bg-gradient-to-b from-paper-50 to-paper-200 font-display text-3xl text-ink-900 shadow-[0_12px_30px_-14px_rgba(0,0,0,0.9)]"
     >
       {value ?? "?"}
     </motion.span>

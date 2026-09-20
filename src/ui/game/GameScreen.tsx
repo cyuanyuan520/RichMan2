@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import type { GameAction, PlayerId } from "@/game/core/types";
 import { getLegalActions, netWorth, pendingTargetOptions } from "@/game/selectors";
-import { actorIdOf, useGameStore } from "@/store/game-store";
+import { actorIdOf, turnOwnerName, useGameStore, type LogEntry } from "@/store/game-store";
 import { useNetStore } from "@/store/net-store";
 import { OnlineChatDock } from "@/ui/AppShell";
 import { skinsFor } from "@/ui/hud/skins";
@@ -50,6 +50,9 @@ export function GameScreen() {
 
   const director = useDirector();
   const [tab, setTab] = useState<Tab>("items");
+  const logReadCount = useGameStore((state) => state.logReadCount);
+  const markLogRead = useGameStore((state) => state.markLogRead);
+  const logUnread = tab !== "log" && log.length > logReadCount;
   const [shopOpen, setShopOpen] = useState(false);
   const [lotteryOpen, setLotteryOpen] = useState(false);
   const [detailPlayer, setDetailPlayer] = useState<PlayerId | null>(null);
@@ -144,6 +147,31 @@ export function GameScreen() {
             {game.config.targetRounds > 0 ? ` / ${game.config.targetRounds}` : ""}
           </span>
         </div>
+        {actorId ? (
+          <div
+            className="flex items-center gap-2 rounded-full border px-3 py-1"
+            style={{
+              borderColor: `${skins[actorId]?.color ?? "#e0b64f"}66`,
+              background: `${skins[actorId]?.color ?? "#e0b64f"}14`,
+            }}
+          >
+            <span className="text-base leading-none">
+              {content.characters[game.players.find((player) => player.id === actorId)?.characterId ?? ""]?.avatar ?? "🎲"}
+            </span>
+            <span className="text-xs text-paper-100">
+              轮到 <span className="font-display text-gold-200">{turnOwnerName(game)}</span>
+            </span>
+            {!busy && game.phase !== "finished" ? (
+              <motion.span
+                className="text-[10px] text-paper-200/65"
+                animate={{ opacity: [0.35, 1, 0.35] }}
+                transition={{ duration: 1.4, repeat: Infinity }}
+              >
+                {isActor ? "等待你操作" : "行动中…"}
+              </motion.span>
+            ) : null}
+          </div>
+        ) : null}
         <div className="flex items-center gap-2">
           {playerCount > 0 ? (
             <span className="text-[11px] text-paper-200/60">
@@ -168,6 +196,8 @@ export function GameScreen() {
           </Button>
         </div>
       </header>
+
+      <EventTicker entry={log.length > 0 ? log[log.length - 1] : null} round={game.round} />
 
       <div className="flex min-h-0 flex-1 gap-3 p-3">
         <main className="relative min-h-0 min-w-0 flex-1">
@@ -196,12 +226,23 @@ export function GameScreen() {
           <AnimatePresence>
             {director.banner ? (
               <motion.div
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                className="pointer-events-none absolute left-1/2 top-6 z-40 -translate-x-1/2 rounded-2xl border border-gold-400/40 bg-ink-950/90 px-6 py-3 font-display text-lg text-gold-200 shadow-xl"
+                initial={{ opacity: 0, scale: 0.88, y: -14 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.94, y: -8 }}
+                transition={{ type: "spring", stiffness: 320, damping: 26 }}
+                className={cn(
+                  "pointer-events-none absolute left-1/2 top-6 z-40 w-[26rem] max-w-[90%] -translate-x-1/2 rounded-2xl border px-6 py-4 text-center shadow-2xl backdrop-blur",
+                  director.banner.tone === "gold" && "border-gold-400/50 bg-ink-950/92 text-gold-200",
+                  director.banner.tone === "bad" && "border-rose-400/50 bg-ink-950/92 text-rose-200",
+                  director.banner.tone === "good" && "border-emerald-400/50 bg-ink-950/92 text-emerald-200",
+                  director.banner.tone === "info" && "border-white/25 bg-ink-950/92 text-paper-100",
+                )}
               >
-                {director.banner}
+                <div className="text-3xl leading-none">{director.banner.icon}</div>
+                <div className="mt-1 font-display text-2xl leading-tight">{director.banner.title}</div>
+                {director.banner.detail ? (
+                  <div className="mt-1 text-xs opacity-80">{director.banner.detail}</div>
+                ) : null}
               </motion.div>
             ) : null}
           </AnimatePresence>
@@ -262,7 +303,12 @@ export function GameScreen() {
                 <button
                   key={key}
                   type="button"
-                  onClick={() => setTab(key)}
+                  onClick={() => {
+                    setTab(key);
+                    if (key === "log") {
+                      markLogRead();
+                    }
+                  }}
                   className={cn(
                     "rounded-lg px-3 py-1 text-[11px] transition-colors",
                     tab === key
@@ -271,6 +317,9 @@ export function GameScreen() {
                   )}
                 >
                   {label}
+                  {key === "log" && logUnread ? (
+                    <span className="ml-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-gold-300 align-middle" />
+                  ) : null}
                 </button>
               ))}
               <span className="ml-auto pr-2 text-[10px] text-paper-200/40">
@@ -439,6 +488,43 @@ function DiceStrip({ dice }: { dice: ReturnType<typeof useDirector>["dice"] }) {
       <span className="text-[11px] text-gold-300">
         {dice.rolling ? "掷骰中…" : "已掷出"}
       </span>
+    </div>
+  );
+}
+
+const TICKER_TONE: Record<string, string> = {
+  info: "text-paper-100",
+  good: "text-emerald-300",
+  bad: "text-rose-300",
+  gold: "text-gold-200",
+};
+
+function EventTicker({ entry, round }: { entry: LogEntry | null; round: number }) {
+  return (
+    <div className="flex h-9 shrink-0 items-center gap-2 border-b border-white/6 bg-ink-950/45 px-4">
+      <span className="shrink-0 rounded-md bg-gold-500/15 px-1.5 py-0.5 text-[10px] text-gold-200">
+        最新
+      </span>
+      <div className="relative min-w-0 flex-1 overflow-hidden">
+        <AnimatePresence mode="popLayout" initial={false}>
+          {entry ? (
+            <motion.p
+              key={entry.id}
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -12 }}
+              transition={{ duration: 0.22 }}
+              className={cn("truncate text-xs", TICKER_TONE[entry.tone] ?? "text-paper-100")}
+            >
+              <span className="mr-1">{entry.icon ?? "•"}</span>
+              {entry.text}
+            </motion.p>
+          ) : (
+            <p className="text-xs text-paper-200/45">等待开局…</p>
+          )}
+        </AnimatePresence>
+      </div>
+      <span className="shrink-0 text-[10px] text-paper-200/40">第 {round} 回合</span>
     </div>
   );
 }

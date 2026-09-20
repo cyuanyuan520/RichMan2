@@ -94,7 +94,7 @@ export function MainMenu({
           transition={{ delay: 0.3, duration: 0.7 }}
           className="mt-14 grid w-full grid-cols-1 gap-4 sm:grid-cols-3"
         >
-          {maps.map((map) => (
+          {maps.map((map, mapIndex) => (
             <article
               key={map.id}
               className="panel group overflow-hidden transition-transform hover:-translate-y-1"
@@ -104,6 +104,7 @@ export function MainMenu({
                   src={map.theme.backgroundImage}
                   alt={map.name}
                   fill
+                  priority={mapIndex === 0}
                   sizes="(max-width: 768px) 100vw, 33vw"
                   className="object-cover transition-transform duration-700 group-hover:scale-105"
                 />

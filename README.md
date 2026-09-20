@@ -24,6 +24,7 @@ npm run dev        # http://localhost:3000
 | `npm run build` / `npm run start` | 生产构建 / 生产预览 |
 | `npm run verify` | 类型检查 + lint + 全部测试（提交前必跑） |
 | `npm run test` | Vitest（引擎 / 联机 / 棋盘 / 商店 / 渲染测试） |
+| `npm run shot` | 用本机 Chrome 无头截图主流程到 `.screenshots/`（需先 `npm run dev`） |
 
 ## 玩法
 

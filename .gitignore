@@ -34,3 +34,6 @@ yarn-error.log*
 # env files
 .env
 .env*.local
+
+# local screenshot output (npm run shot)
+.screenshots/

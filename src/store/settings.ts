@@ -83,10 +83,10 @@ export function saveSettings(settings: AppSettings): void {
 export function aiDelayMs(speed: AppSettings["aiSpeed"]): number {
   switch (speed) {
     case "slow":
-      return 1100;
+      return 2000;
     case "fast":
-      return 320;
-    default:
       return 700;
+    default:
+      return 1300;
   }
 }

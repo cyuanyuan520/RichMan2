@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "verify": "npm run typecheck && npm run lint && npm run test"
+    "verify": "npm run typecheck && npm run lint && npm run test",
+    "shot": "node scripts/screenshots.cjs"
   },
   "dependencies": {
     "motion": "13.4.0",
@@ -34,6 +35,7 @@
     "eslint": "9.39.5",
     "eslint-config-next": "16.3.5",
     "jsdom": "^26.1.0",
+    "puppeteer-core": "^25.11.0",
     "tailwindcss": "4.3.3",
     "typescript": "5.9.3",
     "vitest": "5.0.1"
