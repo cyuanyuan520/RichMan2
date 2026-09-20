@@ -17,6 +17,9 @@ export function rentCellsFor(
       `点数 ×${multiplier}`,
     ]);
   }
+  if (def.kind !== "property") {
+    return [];
+  }
   return [
     ["基础租金", formatMoney(def.rents?.[0] ?? 0)],
     ["满级租金", formatMoney(def.rents?.[def.rents.length - 1] ?? 0)],
