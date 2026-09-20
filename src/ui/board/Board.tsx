@@ -6,7 +6,7 @@ import type { GameContent, GameState, PlayerId } from "@/game/core/types";
 import { cn } from "@/lib/format";
 import { TileView, TileTooltip } from "./TileView";
 import { TokenBubble, type TokenSkin } from "./TokenLayer";
-import { ringGridTemplate, ringSpot } from "./geometry";
+import { ringGridTemplate, ringSide, ringSpot } from "./geometry";
 
 export interface Floater {
   id: number;
@@ -70,6 +70,7 @@ export function Board(props: BoardProps) {
         <TileTooltip
           def={inspectDef}
           tile={inspectTile}
+          economy={state.config.economy}
           {...ownerOf(inspectTile.ownerId)}
           groupName={
             inspectDef.group
@@ -93,9 +94,9 @@ export function Board(props: BoardProps) {
       <div className="absolute inset-0 bg-gradient-to-b from-ink-950/25 via-transparent to-ink-950/45" />
 
       {map.layout === "ring" ? (
-        <div className="absolute inset-0 flex items-center justify-center p-2">
+        <div className="absolute inset-0 flex items-center justify-center p-2 [@media(max-height:880px)]:p-1">
           <div
-            className="relative h-full max-h-[calc(100vh-6.5rem)] w-full max-w-[min(100%,calc(100vh-6.5rem))] rounded-[2rem] border p-2.5 shadow-[0_40px_120px_-50px_rgba(0,0,0,0.95)]"
+            className="relative h-full max-h-[calc(100vh-6.5rem)] w-full max-w-[min(100%,calc(100vh-6.5rem))] rounded-[2rem] border p-2.5 shadow-[0_40px_120px_-50px_rgba(0,0,0,0.95)] [@media(max-height:880px)]:p-1.5"
             style={{
               borderColor: map.theme.boardBorder,
               background: `${map.theme.boardBg}f2`,
@@ -126,7 +127,7 @@ export function Board(props: BoardProps) {
               </span>
             ))}
             <div
-              className="relative grid h-full w-full gap-1"
+              className="relative grid h-full w-full gap-1 [@media(max-height:880px)]:gap-0.5"
               style={{
                 gridTemplateColumns: ringGridTemplate,
                 gridTemplateRows: ringGridTemplate,
@@ -148,6 +149,7 @@ export function Board(props: BoardProps) {
                     map={map}
                     def={def}
                     tile={tile}
+                    side={ringSide(index)}
                     highlighted={props.highlightTiles?.includes(index)}
                     selectable={props.selectableTiles?.includes(index)}
                     onSelect={() => props.onTileSelect?.(index)}
@@ -283,7 +285,7 @@ function PathBoard({
   const map = content.map;
   const activeIndex = activePlayerId ? (display[activePlayerId] ?? 0) : 0;
   const focus = map.tiles[activeIndex]?.coord ?? { x: 50, y: 50 };
-  const zoom = 1.18;
+  const zoom = 1.08;
   const ownerOf = useOwners(state, skins);
 
   return (
@@ -314,6 +316,7 @@ function PathBoard({
                 map={map}
                 def={def}
                 tile={state.tiles[index]}
+                active={index === activeIndex}
                 highlighted={highlightTiles?.includes(index)}
                 selectable={selectableTiles?.includes(index)}
                 onSelect={() => onTileSelect?.(index)}

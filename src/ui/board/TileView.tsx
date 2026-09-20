@@ -1,8 +1,9 @@
 "use client";
 
-import type { MapDef, TileDef, TileState } from "@/game/core/types";
+import type { EconomyConfig, MapDef, TileDef, TileState } from "@/game/core/types";
 import { cn } from "@/lib/format";
 import { Chip } from "@/ui/components/primitives";
+import { rentCellsFor } from "./rent-display";
 
 const kindIcon: Record<string, string> = {
   start: "🚩",
@@ -55,6 +56,7 @@ export interface TileViewProps {
   highlighted?: boolean;
   selectable?: boolean;
   dimmed?: boolean;
+  active?: boolean;
   onSelect?: () => void;
   variant?: "ring" | "path";
   side?: "bottom" | "left" | "top" | "right";
@@ -69,6 +71,7 @@ export function TileView({
   highlighted,
   selectable,
   dimmed,
+  active,
   onSelect,
   variant = "ring",
   side,
@@ -80,7 +83,67 @@ export function TileView({
   const accent = group?.color ?? kindAccent[def.kind] ?? "#e0b64f";
   const icon = def.icon ?? kindIcon[def.kind] ?? "◆";
   const label = kindLabel[def.kind] ?? def.subtitle ?? "";
-  const topOriented = variant === "ring" && side === "top";
+  const isRing = variant === "ring";
+  const topOriented = isRing && side === "top";
+
+  if (variant === "path") {
+    return (
+      <div className="relative flex flex-col items-center">
+        <span
+          className={cn(
+            "mb-0.5 whitespace-nowrap rounded bg-ink-950/85 px-1 text-[9px] leading-tight text-paper-50",
+            !(active || highlighted || selectable) && "hidden",
+          )}
+        >
+          {def.name}
+        </span>
+        <button
+          type="button"
+          onClick={selectable ? onSelect : undefined}
+          disabled={!selectable}
+          title={def.name}
+          className={cn(
+            "relative grid h-9 w-9 place-items-center rounded-full border-2 text-sm shadow-[0_4px_14px_rgba(0,0,0,0.6)] transition-transform",
+            "bg-ink-950/85 backdrop-blur-[1px]",
+            selectable && "cursor-pointer hover:scale-110",
+            highlighted && "ring-2 ring-gold-400",
+            dimmed && "opacity-45 saturate-50",
+          )}
+          style={{
+            borderColor: ownerColor ?? accent,
+            background: `radial-gradient(circle at 50% 35%, ${accent}40, rgba(9,13,19,0.9) 70%)`,
+          }}
+        >
+          {active ? (
+            <span className="pointer-events-none absolute -inset-1 animate-ping rounded-full border-2 border-gold-300/60" />
+          ) : null}
+          <span className="leading-none">{icon}</span>
+          {tile.level > 0 ? (
+            <span className="absolute -top-1 left-1/2 flex -translate-x-1/2 gap-[2px]">
+              {Array.from({ length: Math.min(tile.level, 4) }).map((_, levelIndex) => (
+                <span key={levelIndex} className="block h-1 w-1 rounded-full bg-gold-300" />
+              ))}
+            </span>
+          ) : null}
+          {tile.ownerId ? (
+            <span
+              className="absolute -bottom-0.5 left-1/2 h-1.5 w-1.5 -translate-x-1/2 rounded-full"
+              style={{ background: ownerColor ?? "#e0b64f" }}
+              title={ownerName}
+            />
+          ) : null}
+          {tile.mortgaged ? (
+            <span className="absolute -right-1 -top-1 rounded bg-ink-950/90 px-0.5 text-[8px] text-rose-200">
+              押
+            </span>
+          ) : null}
+          {tile.effects.some((effect) => effect.kind === "roadblock") ? (
+            <span className="absolute -right-1 -bottom-1 text-[10px]">🚧</span>
+          ) : null}
+        </button>
+      </div>
+    );
+  }
 
   const band = (
     <span
@@ -100,12 +163,12 @@ export function TileView({
     <span
       className={cn(
         "flex min-h-0 w-full flex-1 flex-col items-center justify-center gap-0.5",
-        variant === "path" && "items-start",
+        !isRing && "items-start",
       )}
     >
       <span className="flex w-full items-center justify-between gap-1">
         <span
-          className="grid h-5 w-5 shrink-0 place-items-center rounded-md text-[11px] leading-none"
+          className="grid h-5 w-5 shrink-0 place-items-center rounded-md text-[11px] leading-none [@media(max-height:880px)]:h-4 [@media(max-height:880px)]:w-4 [@media(max-height:880px)]:text-[9px]"
           style={{ background: `${accent}2e`, boxShadow: `inset 0 0 0 1px ${accent}55` }}
         >
           {icon}
@@ -115,7 +178,7 @@ export function TileView({
             {Array.from({ length: Math.min(tile.level, 4) }).map((_, levelIndex) => (
               <span
                 key={levelIndex}
-                className={cn("block bg-gold-300", variant === "ring" ? "h-1.5 w-1.5 rounded-[2px]" : "h-1 w-2.5 rounded-full")}
+                className={cn("block bg-gold-300", isRing ? "h-1.5 w-1.5 rounded-[2px]" : "h-1 w-2.5 rounded-full")}
               />
             ))}
           </span>
@@ -124,15 +187,17 @@ export function TileView({
       <span
         className={cn(
           "w-full font-display font-medium leading-[1.15] text-paper-50",
-          variant === "ring" ? "line-clamp-2 text-center text-[11px]" : "truncate text-xs",
+          variant === "ring"
+            ? "line-clamp-2 text-center text-[11px] [@media(max-height:880px)]:line-clamp-1 [@media(max-height:880px)]:text-[10px]"
+            : "truncate text-xs",
         )}
         title={def.name}
       >
         {def.name}
       </span>
-      {variant === "ring" ? (
+      {isRing ? (
         <span
-          className="w-full rounded-[5px] bg-black/25 py-[1px] text-center text-[9px] leading-tight"
+          className="w-full rounded-[5px] bg-black/25 py-[1px] text-center text-[9px] leading-tight [@media(max-height:880px)]:py-0 [@media(max-height:880px)]:text-[8px]"
           style={{ color: def.price ? "#f3d9a4" : "rgba(232,226,214,0.55)" }}
         >
           {def.price ? `¥${def.price}` : label}
@@ -154,7 +219,7 @@ export function TileView({
         "group relative flex w-full select-none overflow-hidden text-left transition-all duration-200",
         variant === "ring"
           ? cn("h-full min-h-0 gap-0.5 rounded-xl border px-0.5 pt-0.5 pb-0.5", topOriented ? "flex-col-reverse" : "flex-col")
-          : "min-w-[92px] items-stretch gap-1.5 rounded-2xl border p-1.5 backdrop-blur-sm",
+          : "min-w-[76px] max-w-[92px] items-stretch gap-1 rounded-xl border p-1 backdrop-blur-sm",
         "border-white/10",
         "bg-gradient-to-b from-ink-800/94 to-ink-950/96",
         selectable && "cursor-pointer hover:z-20 hover:-translate-y-0.5 hover:border-gold-400/60",
@@ -162,14 +227,14 @@ export function TileView({
         dimmed && "opacity-45 saturate-50",
       )}
     >
-      {variant === "ring" && isProperty ? (
+      {isRing && isProperty ? (
         <span
           aria-hidden
           className="pointer-events-none absolute inset-0"
           style={{ background: `linear-gradient(180deg, ${accent}24, transparent 58%)` }}
         />
       ) : null}
-      {variant === "ring" && !isProperty ? (
+      {isRing && !isProperty ? (
         <span
           aria-hidden
           className="pointer-events-none absolute inset-0"
@@ -221,13 +286,20 @@ export function TileTooltip({
   tile,
   ownerName,
   groupName,
+  economy,
 }: {
   def: TileDef;
   tile: TileState;
   ownerName?: string;
   groupName?: string;
+  economy?: EconomyConfig;
 }) {
-  const rent = def.rents && def.rents.length > 0 ? def.rents : [];
+  const rentCells = economy
+    ? rentCellsFor(def, economy)
+    : (def.rents ?? []).map((value, index) => [
+        index === 0 ? "基础" : `${index}级`,
+        `¥${value}`,
+      ]);
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between gap-3">
@@ -243,12 +315,16 @@ export function TileTooltip({
           {def.upgradeCosts?.[0] ? ` · 升级 ¥${def.upgradeCosts[0]}` : ""}
         </p>
       ) : null}
-      {rent.length > 0 ? (
-        <div className="grid grid-cols-5 gap-1 text-[10px] text-paper-200/80">
-          {rent.map((value, index) => (
-            <span key={index} className="rounded bg-white/5 px-1 py-0.5 text-center">
-              {index === 0 ? "基础" : `${index}级`}
-              <br />¥{value}
+      {rentCells.length > 0 ? (
+        <div
+          className="grid gap-1 text-[10px] text-paper-200/80"
+          style={{ gridTemplateColumns: `repeat(${rentCells.length}, minmax(0, 1fr))` }}
+        >
+          {rentCells.map(([cellLabel, value]) => (
+            <span key={cellLabel} className="rounded bg-white/5 px-1 py-0.5 text-center">
+              {cellLabel}
+              <br />
+              {value}
             </span>
           ))}
         </div>

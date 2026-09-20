@@ -5,6 +5,7 @@
 //   npm run dev            # in another terminal
 //   npm run shot           # captures .screenshots/*.png
 //   npm run shot -- --url http://localhost:3001
+//   npm run shot -- --size 1366x768 --map 中国之旅
 //
 // Requires Google Chrome (CHROME_PATH overrides the default location).
 const fs = require("fs");
@@ -20,6 +21,8 @@ const argValue = (name, fallback) => {
 const CHROME =
   process.env.CHROME_PATH || "C:/Program Files/Google/Chrome/Application/chrome.exe";
 const URL = argValue("--url", "http://localhost:3000");
+const [width, height] = argValue("--size", "1600x900").split("x").map(Number);
+const MAP_NAME = argValue("--map", "");
 const OUT = path.resolve(__dirname, "..", ".screenshots");
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -47,8 +50,8 @@ async function clickText(page, text) {
   const browser = await puppeteer.launch({
     executablePath: CHROME,
     headless: true,
-    args: ["--no-sandbox", "--disable-gpu", "--window-size=1600,900", "--font-render-hinting=none"],
-    defaultViewport: { width: 1600, height: 900, deviceScaleFactor: 1 },
+    args: [`--window-size=${width},${height}`, "--no-sandbox", "--disable-gpu", "--font-render-hinting=none"],
+    defaultViewport: { width, height, deviceScaleFactor: 1 },
   });
   const page = await browser.newPage();
   page.on("pageerror", (error) => console.log("pageerror:", error.message));
@@ -59,6 +62,10 @@ async function clickText(page, text) {
 
   await clickText(page, "单机人机");
   await sleep(700);
+  if (MAP_NAME) {
+    await clickText(page, MAP_NAME);
+    await sleep(400);
+  }
   await page.screenshot({ path: path.join(OUT, "02-setup.png") });
 
   await clickText(page, "开始对局");

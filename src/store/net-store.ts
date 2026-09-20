@@ -23,6 +23,7 @@ import {
   setOnlineDispatcher,
   useGameStore,
 } from "./game-store";
+import { aiDelayMs } from "./settings";
 
 type PeerTransportModule = typeof import("@/net/peer-transport");
 
@@ -323,7 +324,7 @@ export const useNetStore = create<NetStore>((set, get) => ({
           .then(() => {
             set({ status: "lobby", seats: session.seatInfos() });
             tickTimer = setInterval(() => {
-              session.tick();
+              session.tick(undefined, aiDelayMs(useGameStore.getState().settings.aiSpeed));
             }, 500);
           })
           .catch((error: unknown) => {

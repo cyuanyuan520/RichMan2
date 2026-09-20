@@ -127,16 +127,21 @@ export function applyRemoteSnapshot(
 ): void {
   gameKeySeq += 1;
   const key = gameKeySeq;
-  useGameStore.setState((current) => ({
-    mode: "online",
-    gameKey: current.game ? current.gameKey : key,
-    content,
-    game: state,
-    localPlayerId,
-    status: state.phase === "finished" ? "finished" : "playing",
-    fxQueue: [...current.fxQueue, ...events],
-    log: [...current.log, ...describeAll(events, state, content)],
-  }));
+  useGameStore.setState((current) => {
+    const previousSeq = current.game?.seq ?? -1;
+    const missedUpdates = previousSeq >= 0 && state.seq - previousSeq > 1;
+    const backlogged = current.fxQueue.length > 12;
+    return {
+      mode: "online",
+      gameKey: current.game ? current.gameKey : key,
+      content,
+      game: state,
+      localPlayerId,
+      status: state.phase === "finished" ? "finished" : "playing",
+      fxQueue: missedUpdates || backlogged ? events : [...current.fxQueue, ...events],
+      log: [...current.log, ...describeAll(events, state, content)],
+    };
+  });
 }
 
 export const useGameStore = create<GameStore>((set, get) => {

@@ -12,6 +12,7 @@ import type {
 import { netWorth } from "@/game/core/reducer";
 import { pendingTargetOptions } from "@/game/selectors";
 import { formatMoney } from "@/lib/format";
+import { rentCellsFor } from "@/ui/board/rent-display";
 import { Button, Chip, Modal, SectionTitle } from "@/ui/components/primitives";
 import { AssetManager, PlayerSummary } from "@/ui/hud/Panels";
 import type { CardDisplay } from "@/ui/fx/use-director";
@@ -32,21 +33,7 @@ export function BuyPropertyDialog({
     ? content.map.groups.find((entry) => entry.id === def.group)
     : undefined;
   const economy = state.config.economy;
-  const rentCells: Array<[string, string]> =
-    def.kind === "transport"
-      ? economy.transportRents.map((rent, index) => [
-          `持有 ${index + 1} 处`,
-          formatMoney(rent),
-        ])
-      : def.kind === "utility"
-        ? economy.utilityMultipliers.map((multiplier, index) => [
-            `持有 ${index + 1} 处`,
-            `点数 ×${multiplier}`,
-          ])
-        : [
-            ["基础租金", formatMoney(def.rents?.[0] ?? 0)],
-            ["满级租金", formatMoney(def.rents?.[def.rents.length - 1] ?? 0)],
-          ];
+  const rentCells = rentCellsFor(def, economy);
   return (
     <Modal open>
       <div className="space-y-4 p-6">

@@ -83,6 +83,7 @@ export class HostSession {
   private recentEvents: GameEvent[] = [];
   private chatHistory: ChatBroadcast[] = [];
   private strikes = new Map<Transport, number>();
+  private lastBotActionAt = 0;
 
   constructor(setup: GameSetup, content: GameContent, options: HostOptions = {}) {
     this.setup = setup;
@@ -558,9 +559,12 @@ export class HostSession {
     }
   }
 
-  tick(now: number = this.options.now()): boolean {
+  tick(now: number = this.options.now(), paceMs = 0): boolean {
     this.maintainLiveness(now);
     if (!this.startedGame || !this.state || this.state.phase === "finished") {
+      return false;
+    }
+    if (paceMs > 0 && now - this.lastBotActionAt < paceMs) {
       return false;
     }
     const pending = this.state.pending;
@@ -578,6 +582,7 @@ export class HostSession {
       const result = reduce(this.state, action, this.content);
       this.state = result.state;
       this.stashEvents(result.events);
+      this.lastBotActionAt = now;
     } catch {
       return false;
     }

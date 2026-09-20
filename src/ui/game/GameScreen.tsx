@@ -104,6 +104,14 @@ export function GameScreen() {
   const isActor = actorId === localPlayerId;
   const busy = director.busy;
   const actions = localPlayerId ? getLegalActions(game, content, localPlayerId) : [];
+  const actorPlayer = game.players.find((player) => player.id === actorId);
+  const actorLine = isActor
+    ? busy
+      ? "演出中…"
+      : "等待你操作"
+    : busy
+      ? "演出中…"
+      : `${actorPlayer?.name ?? "对手"}${actorPlayer?.isBot ? "（AI）" : ""} ${game.phase === "finished" ? "" : "思考中…"}`;
 
   const selectableTiles = pendingForLocal && targetTiles.length > 0 ? targetTiles : ownedTiles;
 
@@ -266,7 +274,7 @@ export function GameScreen() {
             ))}
           </div>
 
-          <DiceStrip dice={director.dice} />
+          <DiceStrip dice={director.dice} actorLine={actorLine} />
 
           <ActionBar
             state={game}
@@ -470,24 +478,34 @@ export function GameScreen() {
   );
 }
 
-function DiceStrip({ dice }: { dice: ReturnType<typeof useDirector>["dice"] }) {
+function DiceStrip({
+  dice,
+  actorLine,
+}: {
+  dice: ReturnType<typeof useDirector>["dice"];
+  actorLine: string;
+}) {
   if (!dice) {
     return (
-      <div className="flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-2 text-[11px] text-paper-200/50">
-        等待掷骰
+      <div className="space-y-1 rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-2">
+        <p className="text-center text-[11px] text-paper-200/50">等待掷骰</p>
+        <p className="truncate text-center text-[10px] text-paper-200/45">{actorLine}</p>
       </div>
     );
   }
   const sum = dice.dice[0] + dice.dice[1];
   return (
-    <div className="flex items-center justify-between rounded-2xl border border-gold-400/25 bg-gold-500/[0.06] px-3 py-2">
-      <span className="text-[11px] text-paper-200/70">
-        {dice.dice[0]} + {dice.dice[1]} = {sum}
-        {dice.dice[0] === dice.dice[1] ? " · 双数" : ""}
-      </span>
-      <span className="text-[11px] text-gold-300">
-        {dice.rolling ? "掷骰中…" : "已掷出"}
-      </span>
+    <div className="space-y-1 rounded-2xl border border-gold-400/25 bg-gold-500/[0.06] px-3 py-2">
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] text-paper-200/70">
+          {dice.dice[0]} + {dice.dice[1]} = {sum}
+          {dice.dice[0] === dice.dice[1] ? " · 双数" : ""}
+        </span>
+        <span className="text-[11px] text-gold-300">
+          {dice.rolling ? "掷骰中…" : "已掷出"}
+        </span>
+      </div>
+      <p className="truncate text-[10px] text-paper-200/45">{actorLine}</p>
     </div>
   );
 }
