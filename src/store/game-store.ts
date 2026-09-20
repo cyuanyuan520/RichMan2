@@ -42,6 +42,7 @@ interface GameStore {
   updateSettings: (patch: Partial<AppSettings>) => void;
 
   mode: GameMode;
+  gameKey: number;
   content: GameContent | null;
   game: GameState | null;
   localPlayerId: PlayerId | null;
@@ -56,7 +57,6 @@ interface GameStore {
   dispatch: (action: GameAction) => { ok: boolean; error?: string };
   setAnimating: (value: boolean) => void;
   shiftFx: () => GameEvent | undefined;
-  drainFx: () => void;
   notify: (text: string, tone?: LogTone) => void;
   clearToast: () => void;
   backToMenu: () => void;
@@ -64,6 +64,7 @@ interface GameStore {
 
 let botTimer: ReturnType<typeof setTimeout> | null = null;
 let botGeneration = 0;
+let gameKeySeq = 0;
 let logSeq = 0;
 let toastSeq = 0;
 
@@ -122,8 +123,11 @@ export function applyRemoteSnapshot(
   content: GameContent,
   localPlayerId: PlayerId | null,
 ): void {
+  gameKeySeq += 1;
+  const key = gameKeySeq;
   useGameStore.setState((current) => ({
     mode: "online",
+    gameKey: current.game ? current.gameKey : key,
     content,
     game: state,
     localPlayerId,
@@ -187,6 +191,7 @@ export const useGameStore = create<GameStore>((set, get) => {
     },
 
     mode: "menu",
+    gameKey: 0,
     content: null,
     game: null,
     localPlayerId: null,
@@ -202,8 +207,10 @@ export const useGameStore = create<GameStore>((set, get) => {
       const content = buildGameContent(setup.mapId);
       const { state, events } = bootstrapGame(setup, content);
       logSeq += 1;
+      gameKeySeq += 1;
       set({
         mode: "local",
+        gameKey: gameKeySeq,
         content,
         game: state,
         localPlayerId: state.players[localSeat]?.id ?? state.players[0].id,
@@ -228,7 +235,11 @@ export const useGameStore = create<GameStore>((set, get) => {
 
     dispatch: (action) => {
       const { game, content, mode } = get();
-      if (mode === "online" && onlineDispatcher) {
+      if (mode === "online") {
+        if (!onlineDispatcher) {
+          get().notify("与主机连接已断开", "bad");
+          return { ok: false, error: "与主机连接已断开" };
+        }
         return onlineDispatcher(action);
       }
       if (!game || !content) {
@@ -262,7 +273,6 @@ export const useGameStore = create<GameStore>((set, get) => {
       set({ fxQueue: rest });
       return head;
     },
-    drainFx: () => set({ fxQueue: [] }),
 
     notify: (text, tone = "info") => {
       toastSeq += 1;
@@ -274,6 +284,7 @@ export const useGameStore = create<GameStore>((set, get) => {
       cancelBot();
       set({
         mode: "menu",
+        gameKey: 0,
         content: null,
         game: null,
         localPlayerId: null,

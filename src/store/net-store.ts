@@ -5,13 +5,13 @@ import type Peer from "peerjs";
 import type { DataConnection } from "peerjs";
 import type {
   BotDifficulty,
-  GameAction,
   GameContent,
   GameEvent,
   GameSetup,
   GameState,
   PlayerId,
 } from "@/game/core/types";
+import { STATE_VERSION } from "@/game/core/state";
 import { buildGameContent, characters, economy, tokens } from "@/data/content";
 import { HostSession } from "@/net/host";
 import { ClientSession } from "@/net/client";
@@ -33,6 +33,8 @@ export interface OnlineLobbyConfig {
   playerCount: number;
   targetRounds: number;
   aiDifficulty: BotDifficulty;
+  characterId: string;
+  tokenId: string;
 }
 
 export interface ChatLine {
@@ -52,7 +54,6 @@ interface NetStore {
   chat: ChatLine[];
   emote: { fromName: string; emoteId: EmoteId; at: number; id: number } | null;
   lobbyConfig: OnlineLobbyConfig;
-  supportChat: boolean;
   setLobbyConfig: (patch: Partial<OnlineLobbyConfig>) => void;
   createRoom: () => void;
   joinRoom: (code: string) => void;
@@ -84,6 +85,8 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempts = 0;
 let tearingDown = false;
 let chatSeq = 0;
+let verifiedContentHash: string | null = null;
+let sessionGeneration = 0;
 const MAX_RECONNECT_ATTEMPTS = 5;
 
 function tokenKey(code: string): string {
@@ -121,6 +124,8 @@ function stopTimers(): void {
 
 function teardown(): void {
   tearingDown = true;
+  sessionGeneration += 1;
+  verifiedContentHash = null;
   stopTimers();
   cancelPendingBotTimer();
   for (const connection of connections) {
@@ -140,6 +145,31 @@ function teardown(): void {
   host = null;
   setOnlineDispatcher(null);
   tearingDown = false;
+}
+
+function scheduleReconnect(generation: number): void {
+  if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+    useNetStore.setState({
+      status: "error",
+      error: "多次重连失败，请返回主菜单重新加入房间",
+    });
+    return;
+  }
+  reconnectAttempts += 1;
+  if (reconnectTimer !== null) {
+    clearTimeout(reconnectTimer);
+  }
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    if (generation !== sessionGeneration) {
+      return;
+    }
+    const current = useNetStore.getState();
+    if (current.status !== "closed" || !current.roomCode) {
+      return;
+    }
+    current.joinRoom(current.roomCode);
+  }, 2500);
 }
 
 function appendChat(line: Omit<ChatLine, "id">): void {
@@ -168,8 +198,10 @@ function buildHostSetup(config: OnlineLobbyConfig): GameSetup {
     economy,
     players: Array.from({ length: count }).map((_, index) => ({
       name: index === 0 ? settings.playerName : `玩家${index + 1}`,
-      characterId: characters[index % characters.length].id,
-      tokenId: tokens[index % tokens.length].id,
+      characterId: (index === 0
+        ? (config.characterId as GameSetup["players"][number]["characterId"])
+        : characters[index % characters.length].id),
+      tokenId: index === 0 ? config.tokenId : tokens[index % tokens.length].id,
       isBot: false,
       botDifficulty: config.aiDifficulty,
     })),
@@ -190,12 +222,13 @@ export const useNetStore = create<NetStore>((set, get) => ({
   seats: [],
   chat: [],
   emote: null,
-  supportChat: false,
   lobbyConfig: {
     mapId: useGameStore.getState().settings.defaultMapId,
     playerCount: 4,
     targetRounds: 0,
     aiDifficulty: useGameStore.getState().settings.defaultDifficulty,
+    characterId: characters[0].id as string,
+    tokenId: tokens[0].id as string,
   },
 
   setLobbyConfig: (patch) => set((current) => ({ lobbyConfig: { ...current.lobbyConfig, ...patch } })),
@@ -266,17 +299,37 @@ export const useNetStore = create<NetStore>((set, get) => ({
     teardown();
     const code = rawCode.trim().toUpperCase();
     const settings = useGameStore.getState().settings;
-    const characterId = characters[0].id;
-    const tokenId = tokens[0].id;
+    const config = get().lobbyConfig;
+    const characterId = config.characterId;
+    const tokenId = config.tokenId;
+    sessionGeneration += 1;
+    const generation = sessionGeneration;
+    verifiedContentHash = null;
     set({ role: "client", roomCode: code, status: "connecting", error: null, seats: [], chat: [] });
     const session = new ClientSession({
       onWelcome: (welcome) => {
-        const content = buildGameContent(welcome.mapId);
+        if (generation !== sessionGeneration) {
+          return;
+        }
+        if (welcome.engine !== STATE_VERSION) {
+          set({ status: "error", error: "主机引擎版本不一致，请刷新页面" });
+          teardown();
+          return;
+        }
+        let content: GameContent;
+        try {
+          content = buildGameContent(welcome.mapId);
+        } catch {
+          set({ status: "error", error: "主机使用了未知地图，请刷新页面" });
+          teardown();
+          return;
+        }
         if (content.contentHash !== welcome.contentHash) {
           set({ status: "error", error: "游戏内容与主机不一致，请刷新页面后重试" });
           teardown();
           return;
         }
+        verifiedContentHash = content.contentHash;
         saveToken(code, welcome.token);
         reconnectAttempts = 0;
         set({
@@ -295,12 +348,34 @@ export const useNetStore = create<NetStore>((set, get) => ({
         }
       },
       onUpdate: (update) => {
-        const content = buildGameContent(update.snapshot.mapId);
+        if (generation !== sessionGeneration) {
+          return;
+        }
+        let content: GameContent;
+        try {
+          content = buildGameContent(update.snapshot.mapId);
+        } catch {
+          set({ status: "error", error: "主机使用了未知地图，请刷新页面" });
+          teardown();
+          return;
+        }
+        if (
+          verifiedContentHash !== null &&
+          (content.contentHash !== verifiedContentHash ||
+            update.snapshot.contentHash !== verifiedContentHash)
+        ) {
+          set({ status: "error", error: "主机内容与握手校验不一致，已断开连接" });
+          teardown();
+          return;
+        }
         set({ status: "playing", seats: update.players });
         const seat = session.seat;
         applyRemoteSnapshot(update.snapshot, update.events, content, seat);
       },
       onRejected: (rejected) => {
+        if (generation !== sessionGeneration) {
+          return;
+        }
         if (rejected.code === "version" || rejected.code === "content" || rejected.code === "closed") {
           set({ status: "error", error: rejected.reason });
           teardown();
@@ -309,35 +384,32 @@ export const useNetStore = create<NetStore>((set, get) => ({
         }
       },
       onChat: (line) => {
+        if (generation !== sessionGeneration) {
+          return;
+        }
         appendChat({ fromId: line.fromId, fromName: line.fromName, text: line.text, at: line.at });
       },
       onEmote: (line) => {
+        if (generation !== sessionGeneration) {
+          return;
+        }
         chatSeq += 1;
         set({
           emote: { fromName: line.fromName, emoteId: line.emoteId, at: line.at, id: chatSeq },
         });
       },
-      onSeatUpdate: (players) => set({ seats: players }),
+      onSeatUpdate: (players) => {
+        if (generation === sessionGeneration) {
+          set({ seats: players });
+        }
+      },
       onClose: () => {
-        if (tearingDown) {
+        if (tearingDown || generation !== sessionGeneration) {
           return;
         }
         if (get().status !== "idle" && get().status !== "error") {
           set({ status: "closed", error: "与主机的连接已断开" });
-          if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-            reconnectAttempts += 1;
-            reconnectTimer = setTimeout(() => {
-              reconnectTimer = null;
-              if (get().status === "closed") {
-                get().joinRoom(get().roomCode ?? "");
-              }
-            }, 2500);
-          } else {
-            set({
-              status: "error",
-              error: "多次重连失败，请返回主菜单重新加入房间",
-            });
-          }
+          scheduleReconnect(generation);
         }
       },
     });
@@ -348,27 +420,42 @@ export const useNetStore = create<NetStore>((set, get) => ({
         session.connect(peerTransport(connection), {
           name: settings.playerName,
           protocol: PROTOCOL_VERSION,
+          engine: STATE_VERSION,
           token: loadToken(code),
           characterId,
           tokenId,
         });
       })
       .catch((error: unknown) => {
-        set({
-          status: "error",
-          error: error instanceof Error ? error.message : "连接房间失败",
-        });
+        if (generation !== sessionGeneration) {
+          return;
+        }
+        const message = error instanceof Error ? error.message : "连接房间失败";
+        if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+          set({ status: "closed", error: `${message}，正在重试…` });
+          scheduleReconnect(generation);
+          return;
+        }
+        set({ status: "error", error: `多次重连失败：${message}` });
       });
 
     setOnlineDispatcher((action) => {
       if (!client) {
-        return { ok: false, error: "尚未连接房间" };
+        const message = "尚未连接房间";
+        useGameStore.getState().notify(message, "bad");
+        return { ok: false, error: message };
       }
       const intent = toIntent(action);
       if (!intent) {
-        return { ok: false, error: "联机模式暂不支持该操作" };
+        const message = "联机模式暂不支持该操作";
+        useGameStore.getState().notify(message, "bad");
+        return { ok: false, error: message };
       }
-      client.sendIntent(intent);
+      if (!client.sendIntent(intent)) {
+        const message = "未连接到主机";
+        useGameStore.getState().notify(message, "bad");
+        return { ok: false, error: message };
+      }
       return { ok: true };
     });
   },
@@ -378,6 +465,7 @@ export const useNetStore = create<NetStore>((set, get) => ({
     if (!code) {
       return;
     }
+    reconnectAttempts = 0;
     get().joinRoom(code);
   },
 
@@ -439,13 +527,3 @@ export const useNetStore = create<NetStore>((set, get) => ({
   },
 }));
 
-export function hostSnapshot(): { state: GameState; content: GameContent } | null {
-  if (!host || !host.state) {
-    return null;
-  }
-  return { state: host.state, content: host.content };
-}
-
-export function currentSeatId(): PlayerId | null {
-  return hostLocalPlayerId() ?? (client ? client.seat : null);
-}

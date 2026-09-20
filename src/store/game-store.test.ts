@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { GameSetup } from "@/game/core/types";
+import { asMapId } from "@/game/core/ids";
 import { characters, economy, tokens } from "@/data/content";
 import { actorIdOf, cancelPendingBotTimer, isLocalActor, useGameStore } from "./game-store";
 
 function makeSetup(seed = 99): GameSetup {
   return {
-    mapId: "nostalgia",
+    mapId: asMapId("nostalgia"),
     seed,
     targetRounds: 12,
     economy,

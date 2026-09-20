@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import type { GameAction, PlayerId } from "@/game/core/types";
 import { getLegalActions, netWorth, pendingTargetOptions } from "@/game/selectors";
@@ -29,6 +29,7 @@ import { Button, SectionTitle } from "@/ui/components/primitives";
 import { useDirector } from "@/ui/fx/use-director";
 import { cn } from "@/lib/format";
 import { playSfx } from "@/audio/sfx";
+import { playBgm, stopBgm } from "@/audio/bgm";
 
 type Tab = "items" | "log";
 
@@ -58,6 +59,13 @@ export function GameScreen() {
     () => (game && content ? skinsFor(game, content) : {}),
     [game, content],
   );
+
+  useEffect(() => {
+    playBgm(mode === "online" ? "top-hat-and-thimble" : "double-sixes");
+    return () => {
+      stopBgm();
+    };
+  }, [mode]);
 
   const pending = game?.pending ?? null;
   const pendingForLocal = pending?.playerId === localPlayerId;

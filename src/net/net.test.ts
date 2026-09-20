@@ -9,6 +9,7 @@ import {
   type ClientIntent,
   type WelcomeMessage,
 } from "./protocol";
+import { STATE_VERSION } from "@/game/core/state";
 import { buildGameContent } from "@/data/content";
 import { defaultEconomy } from "@/data/content/economy";
 import type { GameSetup } from "@/game/core/types";
@@ -95,7 +96,21 @@ describe("host/client over memory transport", () => {
     expect(client.players[2]!.isBot).toBe(true);
   });
 
-  it("advertises map id and accepts a hello without a content hash", async () => {
+  it("rejects a hello from a different engine version", async () => {
+    const host = new HostSession(makeSetup([false, false, true, true]), content);
+    const [hostSide, clientSide] = memoryTransports("host", "client");
+    host.connect(hostSide);
+    const rejections: string[] = [];
+    const client = new ClientSession({
+      onRejected: (rejected) => rejections.push(rejected.code),
+    });
+    client.connect(clientSide, { ...HELLO, engine: STATE_VERSION + 1 });
+    await flush();
+    expect(rejections).toContain("version");
+    expect(client.seat).toBeNull();
+  });
+
+  it("advertises engine version, map id and accepts a hello without a content hash", async () => {
     const host = new HostSession(makeSetup([false, false, true, true]), content);
     const [hostSide, clientSide] = memoryTransports("host", "client");
     host.connect(hostSide);
@@ -110,6 +125,7 @@ describe("host/client over memory transport", () => {
 
     expect(welcomes).toHaveLength(1);
     expect(welcomes[0]!.mapId).toBe("ink");
+    expect(welcomes[0]!.engine).toBe(STATE_VERSION);
     expect(welcomes[0]!.contentHash).toBe(content.contentHash);
     expect(client.seat).toBe(asPlayerId("p2"));
   });

@@ -31,6 +31,31 @@ export interface PeerEndpointOptions {
   secure?: boolean;
 }
 
+export interface PeerIceConfig {
+  iceServers?: RTCIceServer[];
+  key?: string;
+}
+
+export function iceConfig(): PeerIceConfig {
+  const config: PeerIceConfig = {};
+  const raw = process.env.NEXT_PUBLIC_ICE_SERVERS;
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as RTCIceServer[];
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        config.iceServers = parsed;
+      }
+    } catch {
+      // Ignore malformed JSON; fall back to PeerJS defaults.
+    }
+  }
+  const key = process.env.NEXT_PUBLIC_PEERJS_KEY;
+  if (key) {
+    config.key = key;
+  }
+  return config;
+}
+
 export function peerOptions(): PeerEndpointOptions {
   const host = process.env.NEXT_PUBLIC_PEERJS_HOST;
   const port = process.env.NEXT_PUBLIC_PEERJS_PORT;
@@ -50,6 +75,7 @@ export function peerOptions(): PeerEndpointOptions {
 export function createRoomPeer(code: string): Peer {
   return new Peer(hostPeerId(code), {
     ...peerOptions(),
+    ...iceConfig(),
     debug: 0,
   });
 }
@@ -78,7 +104,7 @@ export interface RoomConnection {
 
 export function connectRoom(code: string, timeoutMs = 15000): Promise<RoomConnection> {
   return new Promise((resolve, reject) => {
-    const peer = new Peer({ ...peerOptions(), debug: 0 });
+    const peer = new Peer({ ...peerOptions(), ...iceConfig(), debug: 0 });
     const timer = setTimeout(() => {
       peer.destroy();
       reject(new Error("连接超时，请确认房间号是否正确"));

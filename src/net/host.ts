@@ -8,7 +8,7 @@ import type {
 } from "@/game/core/types";
 import { EngineError } from "@/game/core/errors";
 import { asPlayerId } from "@/game/core/ids";
-import { bootstrapGame } from "@/game/core/state";
+import { STATE_VERSION, bootstrapGame } from "@/game/core/state";
 import { reduce } from "@/game/core/reducer";
 import { getLegalActions } from "@/game/selectors/legal";
 import { chooseAiAction } from "@/game/ai";
@@ -247,6 +247,7 @@ export class HostSession {
   private handleHello(
     message: {
       protocol: number;
+      engine?: number;
       contentHash?: string;
       token?: string;
       name: string;
@@ -262,6 +263,10 @@ export class HostSession {
     }
     if (message.protocol !== PROTOCOL_VERSION) {
       this.strike(transport, "version", "客户端版本不一致，请刷新页面");
+      return;
+    }
+    if (message.engine !== undefined && message.engine !== STATE_VERSION) {
+      this.strike(transport, "version", "客户端引擎版本不一致，请刷新页面");
       return;
     }
     if (
@@ -320,6 +325,7 @@ export class HostSession {
     const welcome: WelcomeMessage = {
       type: "welcome",
       protocol: PROTOCOL_VERSION,
+      engine: STATE_VERSION,
       contentHash: this.content.contentHash,
       mapId: this.content.map.id,
       seat: seat.playerId,

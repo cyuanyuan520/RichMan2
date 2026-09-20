@@ -31,8 +31,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export function useDirector(): DirectorState {
   const game = useGameStore((state) => state.game);
-  const fxQueue = useGameStore((state) => state.fxQueue);
-  const setAnimating = useGameStore((state) => state.setAnimating);
+  const gameKey = useGameStore((state) => state.gameKey);
 
   const [display, setDisplay] = useState<Record<PlayerId, number>>({});
   const [dice, setDice] = useState<DiceDisplay | null>(null);
@@ -42,16 +41,19 @@ export function useDirector(): DirectorState {
   const [busy, setBusy] = useState(false);
 
   const floaterSeq = useRef(0);
-  const runningRef = useRef(false);
+  const floaterTimers = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
   const [syncedSeq, setSyncedSeq] = useState(-1);
+  const setAnimating = useGameStore((state) => state.setAnimating);
 
   const pushFloater = useCallback((playerId: PlayerId, delta: number) => {
     floaterSeq.current += 1;
     const id = floaterSeq.current;
     setFloaters((current) => [...current, { id, playerId, delta }]);
-    setTimeout(() => {
+    const timer = setTimeout(() => {
+      floaterTimers.current.delete(timer);
       setFloaters((current) => current.filter((entry) => entry.id !== id));
     }, 1200);
+    floaterTimers.current.add(timer);
   }, []);
 
   if (game && game.seq !== syncedSeq) {
@@ -70,20 +72,20 @@ export function useDirector(): DirectorState {
   }
 
   useEffect(() => {
-    if (runningRef.current || fxQueue.length === 0) {
-      return;
-    }
-    let cancelled = false;
-    runningRef.current = true;
-    setBusy(true);
-    setAnimating(true);
+    let disposed = false;
+    let processing = false;
+    let pump: () => Promise<void> = async () => {};
 
     const handle = async (event: GameEvent): Promise<void> => {
+      const live = () => !disposed;
       switch (event.type) {
         case "dice-rolled": {
           playSfx("dice");
           setDice({ dice: event.dice, playerId: event.playerId, rolling: true });
           await sleep(440);
+          if (!live()) {
+            return;
+          }
           setDice({ dice: event.dice, playerId: event.playerId, rolling: false });
           await sleep(200);
           return;
@@ -91,12 +93,15 @@ export function useDirector(): DirectorState {
         case "token-moved": {
           const steps = event.path.length > 0 ? event.path : [event.to];
           for (const step of steps) {
-            if (cancelled) {
+            if (!live()) {
               return;
             }
             playSfx("step");
             setDisplay((current) => ({ ...current, [event.playerId]: step }));
             await sleep(120);
+          }
+          if (!live()) {
+            return;
           }
           setDisplay((current) => ({ ...current, [event.playerId]: event.to }));
           await sleep(90);
@@ -114,7 +119,9 @@ export function useDirector(): DirectorState {
           playSfx("card");
           setCard({ cardId: event.cardId, deck: event.deck, playerId: event.playerId });
           await sleep(1400);
-          setCard(null);
+          if (live()) {
+            setCard(null);
+          }
           await sleep(120);
           return;
         }
@@ -137,34 +144,42 @@ export function useDirector(): DirectorState {
         case "hospitalized": {
           playSfx("jail");
           setBanner(event.type === "jailed" ? "⛓️ 入狱" : "🏥 住院");
-          if (game) {
-            const player = game.players.find((entry) => entry.id === event.playerId);
-            if (player) {
-              setDisplay((current) => ({ ...current, [player.id]: player.position }));
-            }
+          const player = useGameStore
+            .getState()
+            .game?.players.find((entry) => entry.id === event.playerId);
+          if (player) {
+            setDisplay((current) => ({ ...current, [player.id]: player.position }));
           }
           await sleep(620);
-          setBanner(null);
+          if (live()) {
+            setBanner(null);
+          }
           return;
         }
         case "released": {
           setBanner("🕊️ 恢复自由");
           await sleep(520);
-          setBanner(null);
+          if (live()) {
+            setBanner(null);
+          }
           return;
         }
         case "player-bankrupt": {
           playSfx("jail");
           setBanner("💀 破产出局");
           await sleep(900);
-          setBanner(null);
+          if (live()) {
+            setBanner(null);
+          }
           return;
         }
         case "game-ended": {
           playSfx("win");
           setBanner("🏆 对局结束");
           await sleep(800);
-          setBanner(null);
+          if (live()) {
+            setBanner(null);
+          }
           return;
         }
         case "share-wealth": {
@@ -181,28 +196,57 @@ export function useDirector(): DirectorState {
       }
     };
 
-    void (async () => {
-      while (!cancelled) {
-        const store = useGameStore.getState();
-        const next = store.fxQueue[0];
-        if (!next) {
-          break;
+    pump = async () => {
+      if (processing || disposed) {
+        return;
+      }
+      processing = true;
+      setBusy(true);
+      setAnimating(true);
+      try {
+        while (!disposed) {
+          const store = useGameStore.getState();
+          const next = store.fxQueue[0];
+          if (!next) {
+            break;
+          }
+          store.shiftFx();
+          await handle(next);
         }
-        store.shiftFx();
-        await handle(next);
+      } finally {
+        processing = false;
+        if (!disposed) {
+          setBusy(false);
+          setAnimating(false);
+        }
       }
-      runningRef.current = false;
-      if (!cancelled) {
-        setBusy(false);
-        setAnimating(false);
+    };
+
+    void pump();
+
+    const unsubscribe = useGameStore.subscribe((state, previous) => {
+      if (state.fxQueue !== previous.fxQueue) {
+        void pump();
       }
-    })();
+    });
 
     return () => {
-      cancelled = true;
-      runningRef.current = false;
+      disposed = true;
+      unsubscribe();
+      setBusy(false);
+      setAnimating(false);
     };
-  }, [fxQueue, game, pushFloater, setAnimating]);
+  }, [gameKey, pushFloater, setAnimating]);
+
+  useEffect(() => {
+    const timers = floaterTimers.current;
+    return () => {
+      for (const timer of timers) {
+        clearTimeout(timer);
+      }
+      timers.clear();
+    };
+  }, []);
 
   return { display, dice, floaters, card, banner, busy };
 }

@@ -1,11 +1,13 @@
 "use client";
 
+import { useEffect } from "react";
 import Image from "next/image";
 import { motion } from "motion/react";
 import { maps, characters, items } from "@/data/content";
 import { Button, Chip } from "@/ui/components/primitives";
 import { useGameStore } from "@/store/game-store";
 import { playSfx } from "@/audio/sfx";
+import { stopBgm } from "@/audio/bgm";
 
 export type MenuRoute = "main" | "setup" | "online" | "rules" | "settings";
 
@@ -16,6 +18,10 @@ export function MainMenu({
 }) {
   const lastSetup = useGameStore((state) => state.lastSetup);
   const startLocal = useGameStore((state) => state.startLocal);
+
+  useEffect(() => {
+    stopBgm();
+  }, []);
 
   return (
     <div className="relative min-h-screen overflow-hidden">

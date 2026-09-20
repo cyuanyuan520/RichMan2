@@ -98,6 +98,45 @@ export function OnlineLobby({ onNavigate }: { onNavigate: (route: MenuRoute) => 
                 </div>
               </div>
               <div className="space-y-2">
+                <p className="text-[11px] text-paper-200/60">你的角色</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {characters.map((character) => (
+                    <button
+                      key={character.id}
+                      type="button"
+                      onClick={() => setLobbyConfig({ characterId: character.id })}
+                      className={cn(
+                        "flex items-center gap-1.5 rounded-xl border px-2 py-1.5 text-[11px] transition-colors",
+                        config.characterId === character.id
+                          ? "border-gold-400/70 bg-gold-500/12 text-gold-200"
+                          : "border-white/12 text-paper-200/70 hover:border-white/30",
+                      )}
+                    >
+                      <span>{character.avatar}</span>
+                      <span className="truncate">{character.name}</span>
+                    </button>
+                  ))}
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {tokens.map((token) => (
+                    <button
+                      key={token.id}
+                      type="button"
+                      onClick={() => setLobbyConfig({ tokenId: token.id })}
+                      title={token.name}
+                      className={cn(
+                        "grid h-8 w-8 place-items-center rounded-lg border text-base transition-colors",
+                        config.tokenId === token.id
+                          ? "border-gold-400/70 bg-gold-500/12"
+                          : "border-white/12 hover:border-white/30",
+                      )}
+                    >
+                      {token.icon}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-2">
                 <p className="text-[11px] text-paper-200/60">AI 难度（补位与接管）</p>
                 <div className="flex gap-2">
                   {(["easy", "normal", "hard"] as BotDifficulty[]).map((value) => (
@@ -236,8 +275,15 @@ export function OnlineLobby({ onNavigate }: { onNavigate: (route: MenuRoute) => 
             {error ? (
               <div className="flex items-center gap-2 rounded-xl border border-rose-400/30 bg-rose-500/10 px-3 py-2">
                 <span className="flex-1 text-[11px] text-rose-200">{error}</span>
-                {status === "closed" ? (
-                  <Button size="sm" tone="ghost" onClick={reconnect}>
+                {status === "closed" || status === "error" ? (
+                  <Button
+                    size="sm"
+                    tone="ghost"
+                    onClick={() => {
+                      playSfx("click");
+                      reconnect();
+                    }}
+                  >
                     重连
                   </Button>
                 ) : null}

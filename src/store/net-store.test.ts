@@ -1,0 +1,137 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { GameSetup } from "@/game/core/types";
+import { asMapId } from "@/game/core/ids";
+import { bootstrapGame } from "@/game/core/state";
+import { buildGameContent, characters, economy, tokens } from "@/data/content";
+import { applyRemoteSnapshot, setOnlineDispatcher, useGameStore } from "./game-store";
+import { useNetStore } from "./net-store";
+
+const connectRoomMock = vi.fn();
+
+vi.mock("@/net/peer-transport", () => ({
+  ROOM_CODE_LENGTH: 5,
+  randomRoomCode: () => "ABCDE",
+  hostPeerId: (code: string) => `richman2-${code}`,
+  peerOptions: () => ({}),
+  iceConfig: () => ({}),
+  createRoomPeer: () => {
+    throw new Error("createRoomPeer is not used in these tests");
+  },
+  waitForPeerOpen: async () => "richman2-abcde",
+  connectRoom: (...args: unknown[]) => connectRoomMock(...args),
+  connectToRoom: (...args: unknown[]) => connectRoomMock(...args),
+  peerTransport: () => {
+    throw new Error("peerTransport is not used in these tests");
+  },
+}));
+
+function makeSetup(): GameSetup {
+  return {
+    mapId: asMapId("ink"),
+    seed: 5,
+    targetRounds: 0,
+    economy,
+    players: [
+      { name: "甲", characterId: characters[0].id, tokenId: tokens[0].id, isBot: false },
+      { name: "乙", characterId: characters[1].id, tokenId: tokens[1].id, isBot: false },
+    ],
+  };
+}
+
+function seedOnlineGame(): void {
+  const content = buildGameContent("ink");
+  const { state } = bootstrapGame(makeSetup(), content);
+  applyRemoteSnapshot(state, [], content, state.players[0].id);
+}
+
+beforeEach(() => {
+  connectRoomMock.mockReset();
+  setOnlineDispatcher(null);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  useNetStore.getState().leave();
+  setOnlineDispatcher(null);
+});
+
+describe("net store", () => {
+  it("refuses to reduce locally when online without a session", () => {
+    seedOnlineGame();
+    const before = useGameStore.getState().game!;
+    const result = useGameStore
+      .getState()
+      .dispatch({ type: "roll-dice", playerId: before.players[0].id });
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("连接");
+    const after = useGameStore.getState().game!;
+    expect(after.seq).toBe(before.seq);
+    expect(useGameStore.getState().toast?.tone).toBe("bad");
+  });
+
+  it("routes dispatch through the registered online dispatcher", () => {
+    seedOnlineGame();
+    setOnlineDispatcher(() => ({ ok: true }));
+    const before = useGameStore.getState().game!;
+    const result = useGameStore
+      .getState()
+      .dispatch({ type: "roll-dice", playerId: before.players[0].id });
+    expect(result.ok).toBe(true);
+    expect(useGameStore.getState().game!.seq).toBe(before.seq);
+  });
+
+  it("retries the connection when joining fails and exposes a manual retry", async () => {
+    vi.useFakeTimers();
+    connectRoomMock.mockRejectedValue(new Error("连接超时"));
+
+    useNetStore.getState().joinRoom("abcde");
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(connectRoomMock).toHaveBeenCalledTimes(1);
+    const afterFailure = useNetStore.getState();
+    expect(afterFailure.role).toBe("client");
+    expect(afterFailure.roomCode).toBe("ABCDE");
+    expect(afterFailure.status).toBe("closed");
+    expect(afterFailure.error).toContain("重试");
+
+    await vi.advanceTimersByTimeAsync(2600);
+    expect(connectRoomMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+
+    useNetStore.getState().reconnect();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(connectRoomMock.mock.calls.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("queues a client with the lobby character and token selection", async () => {
+    vi.useFakeTimers();
+    connectRoomMock.mockRejectedValue(new Error("nope"));
+    useNetStore.getState().setLobbyConfig({
+      characterId: characters[2].id,
+      tokenId: tokens[3].id,
+    });
+    useNetStore.getState().joinRoom("zzzzz");
+    await vi.advanceTimersByTimeAsync(0);
+
+    const config = useNetStore.getState().lobbyConfig;
+    expect(config.characterId).toBe(characters[2].id);
+    expect(config.tokenId).toBe(tokens[3].id);
+    expect(useNetStore.getState().roomCode).toBe("ZZZZZ");
+  });
+
+  it("stops retrying after the attempt budget and reports an error", async () => {
+    vi.useFakeTimers();
+    connectRoomMock.mockRejectedValue(new Error("连接超时"));
+    useNetStore.getState().joinRoom("qqqqq");
+
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      await vi.advanceTimersByTimeAsync(2600);
+    }
+
+    const state = useNetStore.getState();
+    expect(state.status).toBe("error");
+    expect(state.error).toContain("多次重连失败");
+    const callsAtError = connectRoomMock.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(connectRoomMock.mock.calls.length).toBe(callsAtError);
+  });
+});

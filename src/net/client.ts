@@ -27,6 +27,7 @@ export interface HelloPayload {
   name: string;
   contentHash?: string;
   protocol: number;
+  engine?: number;
   token?: string;
   characterId?: string;
   tokenId?: string;
@@ -81,6 +82,16 @@ export class ClientSession {
       return;
     }
     const message = raw as unknown as HostMessage;
+    try {
+      this.dispatch(message);
+    } catch {
+      // A broken handler must not wedge the session: drop the connection so the
+      // UI can surface an error and reconnect with a clean state.
+      this.close();
+    }
+  }
+
+  private dispatch(message: HostMessage): void {
     switch (message.type) {
       case "welcome": {
         this.seat = message.seat;

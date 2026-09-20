@@ -13,11 +13,12 @@ import { Button } from "@/ui/components/primitives";
 export function AppShell() {
   const mode = useGameStore((state) => state.mode);
   const game = useGameStore((state) => state.game);
+  const gameKey = useGameStore((state) => state.gameKey);
   const netStatus = useNetStore((state) => state.status);
   const [route, setRoute] = useState<MenuRoute>("main");
 
   if (game && (mode === "local" || mode === "online")) {
-    return <GameScreen />;
+    return <GameScreen key={gameKey} />;
   }
 
   if (mode === "online" && netStatus !== "idle") {

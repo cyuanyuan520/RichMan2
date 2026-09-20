@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { asMapId } from "@/game/core/ids";
 import { bootstrapGame } from "@/game/core/state";
 import { reduce } from "@/game/core/reducer";
 import type { GameSetup, GameState, PlayerId } from "@/game/core/types";
@@ -11,7 +12,7 @@ const content = buildGameContent("ink");
 
 function makeSetup(playerCount: number, seed: number): GameSetup {
   return {
-    mapId: "ink",
+    mapId: asMapId("ink"),
     seed,
     targetRounds: 8,
     economy,
