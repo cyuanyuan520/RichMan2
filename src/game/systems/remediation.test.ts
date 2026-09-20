@@ -89,6 +89,99 @@ describe("debt queue", () => {
     expect(100 + (deltas.get(P2) ?? 0)).toBe(result.state.players[1]!.money);
   });
 
+  it("attributes each debt share to its own creditor", () => {
+    const state = makeGame({
+      playerCount: 3,
+      characters: ["xue-ba", "xue-ba", "xue-ba"],
+    });
+    state.players[0]!.money = 100;
+    grantTile(state, tileIndexOf(state, "transport", 0), P1);
+    grantTile(state, tileIndexOf(state, "transport", 1), P1);
+    state.fateDeck = ["fate-treat-dinner"];
+    state.players[0]!.position = 15;
+
+    const rolled = roll(state, [1, 1]);
+    expect(rolled.state.pending?.kind).toBe("raise-funds");
+    expect(rolled.state.pending?.playerId).toBe(P1);
+    if (rolled.state.pending?.kind === "raise-funds") {
+      expect(rolled.state.pending.shares).toEqual([
+        { creditorId: P2, amount: 700, reason: "card" },
+        { creditorId: P3, amount: 800, reason: "card" },
+      ]);
+    }
+
+    const first = act(rolled.state, {
+      type: "mortgage-property",
+      playerId: P1,
+      tileIndex: tileIndexOf(state, "transport", 0),
+    });
+    expect(first.state.pending?.kind).toBe("raise-funds");
+    const second = act(first.state, {
+      type: "mortgage-property",
+      playerId: P1,
+      tileIndex: tileIndexOf(state, "transport", 1),
+    });
+    expect(second.state.pending).toBeNull();
+    expect(second.state.players[0]!.money).toBe(0);
+    expect(second.state.players[1]!.money).toBe(STARTING + 800);
+    expect(second.state.players[2]!.money).toBe(STARTING + 800);
+  });
+
+  it("promotes the queued debtor after the first declares bankrupt", () => {
+    const state = makeGame({
+      playerCount: 3,
+      characters: ["xue-ba", "xue-ba", "xue-ba"],
+    });
+    grantTile(state, tileIndexOf(state, "transport", 0), P2);
+    grantTile(state, tileIndexOf(state, "transport", 1), P3);
+    state.players[1]!.money = 100;
+    state.players[2]!.money = 100;
+    state.chanceDeck = ["chance-dividend"];
+    const rolled = roll(state, [1, 1]);
+    expect(rolled.state.pending?.playerId).toBe(P2);
+
+    const declared = act(rolled.state, {
+      type: "declare-bankrupt",
+      playerId: P2,
+    });
+    expect(declared.state.players[1]!.status).toBe("bankrupt");
+    expect(declared.state.pending?.playerId).toBe(P3);
+    expect(declared.state.debtQueue).toHaveLength(0);
+    expect(declared.state.players[2]!.status).toBe("active");
+    expect(declared.state.tiles[tileIndexOf(state, "transport", 1)]!.ownerId).toBe(
+      P3,
+    );
+  });
+
+  it("aborts the remaining card effects when the actor goes bankrupt mid-card", () => {
+    const base = buildGameContent("ink");
+    const card: CardDef = {
+      id: "test-double-loss",
+      deck: "chance",
+      title: "测试卡",
+      text: "测试用连击卡",
+      effects: [
+        { kind: "money", amount: -999999 },
+        { kind: "gain-item", itemDefId: "roadblock" },
+      ],
+    };
+    const custom: GameContent = {
+      ...base,
+      cards: { ...base.cards, "test-double-loss": card },
+    };
+    const state = makeGame({ characters: ["xue-ba", "xue-ba"] });
+    state.chanceDeck = ["test-double-loss"];
+    const result = reduce(
+      state,
+      { type: "roll-dice", playerId: P1, forcedDice: [1, 1] },
+      custom,
+    );
+    expect(result.state.players[0]!.status).toBe("bankrupt");
+    expect(result.state.players[0]!.items).toHaveLength(0);
+    expect(result.state.queue).toHaveLength(0);
+    expect(result.state.pending).toBeNull();
+  });
+
   it("clears a stale own pending before going bankrupt", () => {
     const state = makeGame({ characters: ["xue-ba", "xue-ba"] });
     state.pending = {
@@ -97,6 +190,7 @@ describe("debt queue", () => {
       creditorId: null,
       amount: 5000,
       reason: "tax",
+      shares: [{ creditorId: null, amount: 5000, reason: "tax" }],
     };
     state.players[0]!.money = -5000;
     const result = act(state, { type: "declare-bankrupt", playerId: P1 });

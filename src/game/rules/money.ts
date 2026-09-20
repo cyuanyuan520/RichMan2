@@ -126,30 +126,31 @@ function queueDebt(
   playerId: PlayerId,
   creditorId: PlayerId | null,
   reason: MoneyReason,
+  deficit: number,
 ): void {
   const player = findPlayer(state, playerId);
-  const amount = -player.money;
-  if (state.pending?.kind === "raise-funds" && state.pending.playerId === playerId) {
-    state.pending.amount = amount;
-    state.pending.creditorId = state.pending.creditorId ?? creditorId;
-    return;
-  }
-  const existing = state.debtQueue.find((debt) => debt.playerId === playerId);
-  if (existing) {
-    existing.amount = amount;
-    existing.creditorId = existing.creditorId ?? creditorId;
+  const share = { creditorId, amount: deficit, reason };
+  const target =
+    state.pending?.kind === "raise-funds" && state.pending.playerId === playerId
+      ? state.pending
+      : state.debtQueue.find((debt) => debt.playerId === playerId);
+  if (target) {
+    target.shares.push(share);
+    target.amount = target.shares.reduce((sum, entry) => sum + entry.amount, 0);
+    target.creditorId = target.creditorId ?? creditorId;
     return;
   }
   state.debtQueue.push({
     kind: "raise-funds",
     playerId,
     creditorId,
-    amount,
+    amount: deficit,
     reason,
+    shares: [share],
   });
   events.push({
     type: "log",
-    text: `${player.name} 欠款 ${amount} 元，等待处理`,
+    text: `${player.name} 欠款 ${deficit} 元，等待处理`,
     icon: "🏚️",
   });
   promoteDebt(state, events);
@@ -187,7 +188,7 @@ export function payMoney(
     return true;
   }
   addMoney(state, events, playerId, -deficit, reason);
-  return requestFunds(state, events, playerId, creditorId, reason);
+  return requestFunds(state, events, playerId, creditorId, reason, deficit);
 }
 
 function requestFunds(
@@ -196,6 +197,7 @@ function requestFunds(
   playerId: PlayerId,
   creditorId: PlayerId | null,
   reason: MoneyReason,
+  deficit: number,
 ): boolean {
   const player = findPlayer(state, playerId);
   if (player.money + liquidateValue(state, playerId) < 0) {
@@ -206,7 +208,7 @@ function requestFunds(
     promoteDebt(state, events);
     return false;
   }
-  queueDebt(state, events, playerId, creditorId, reason);
+  queueDebt(state, events, playerId, creditorId, reason, deficit);
   return false;
 }
 
@@ -225,16 +227,20 @@ export function settleDebtIfPossible(
     return true;
   }
   if (player.money >= 0) {
-    const outstanding = pending.amount;
-    const creditor =
-      outstanding > 0 && pending.creditorId && pending.creditorId !== player.id
-        ? state.players.find(
-            (entry) =>
-              entry.id === pending.creditorId && entry.status !== "bankrupt",
-          )
-        : undefined;
-    if (creditor) {
-      addMoney(state, events, creditor.id, outstanding, pending.reason);
+    for (const share of pending.shares) {
+      if (share.amount <= 0) {
+        continue;
+      }
+      const creditor =
+        share.creditorId && share.creditorId !== player.id
+          ? state.players.find(
+              (entry) =>
+                entry.id === share.creditorId && entry.status !== "bankrupt",
+            )
+          : undefined;
+      if (creditor) {
+        addMoney(state, events, creditor.id, share.amount, share.reason);
+      }
     }
     events.push({
       type: "log",

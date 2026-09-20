@@ -267,6 +267,12 @@ export interface TileState {
   effects: TileEffect[];
 }
 
+export interface DebtShare {
+  creditorId: PlayerId | null;
+  amount: number;
+  reason: MoneyReason;
+}
+
 export type PendingDecision =
   | {
       kind: "buy-property";
@@ -280,6 +286,7 @@ export type PendingDecision =
       creditorId: PlayerId | null;
       amount: number;
       reason: MoneyReason;
+      shares: DebtShare[];
     }
   | {
       kind: "item-target";

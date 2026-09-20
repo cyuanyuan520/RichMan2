@@ -12,6 +12,7 @@ import {
 } from "../systems/effects";
 import { discountedPrice } from "../systems/skills";
 import { maxLevelFor } from "../rules/rent";
+import { MAX_ITEMS_PER_PLAYER } from "../rules/status";
 
 export { pendingTargetOptions };
 
@@ -177,7 +178,7 @@ export function getLegalActions(
       }
     }
     const here = state.tileDefs[player.position] as TileDef | undefined;
-    if (here?.kind === "shop") {
+    if (here?.kind === "shop" && player.items.length < MAX_ITEMS_PER_PLAYER) {
       for (const def of Object.values(content.items)) {
         if (player.money >= def.price) {
           actions.push({ type: "buy-item", playerId, itemDefId: def.id });

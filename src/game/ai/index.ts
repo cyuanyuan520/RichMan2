@@ -193,7 +193,7 @@ function tryUseItem(
     .filter((entry) => entry.def !== undefined);
   const worthwhile = candidates.filter((entry) =>
     (entry.def?.effects ?? []).some((effect) =>
-      ["halt", "audit", "share-wealth", "force-buy", "demolish"].includes(
+      ["skip-turn", "audit", "share-wealth", "force-buy", "demolish"].includes(
         effect.kind,
       ),
     ),
