@@ -72,8 +72,16 @@ export function GameScreen() {
 
   const pending = game?.pending ?? null;
   const pendingForLocal = pending?.playerId === localPlayerId;
-  const decisionVisible = useDecisionVisible(Boolean(pending), director.busy);
-  const gameOverVisible = useDecisionVisible(game?.phase === "finished", director.busy, 1400);
+  const fxQueueLength = useGameStore((state) => state.fxQueue.length);
+  const pendingKey = pending ? `${pending.kind}:${pending.playerId}` : "";
+  const decisionVisible = useDecisionVisible(Boolean(pending), director.busy, 2500, fxQueueLength, pendingKey);
+  const gameOverVisible = useDecisionVisible(
+    game?.phase === "finished",
+    director.busy,
+    2500,
+    fxQueueLength,
+    game?.phase ?? "",
+  );
 
   const targetTiles = useMemo(() => {
     if (!game || !content || !pending) {

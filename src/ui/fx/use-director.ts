@@ -36,8 +36,19 @@ export interface DirectorState {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export function useDecisionVisible(active: boolean, busy: boolean, graceMs = 1600): boolean {
+export function useDecisionVisible(
+  active: boolean,
+  busy: boolean,
+  graceMs = 2500,
+  progressKey = 0,
+  identity = "",
+): boolean {
   const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setVisible(false), 0);
+    return () => clearTimeout(timer);
+  }, [identity]);
 
   useEffect(() => {
     if (!active) {
@@ -48,9 +59,10 @@ export function useDecisionVisible(active: boolean, busy: boolean, graceMs = 160
       const timer = setTimeout(() => setVisible(true), 0);
       return () => clearTimeout(timer);
     }
+    // Watchdog: reveal only after the animation queue stops making progress.
     const timer = setTimeout(() => setVisible(true), graceMs);
     return () => clearTimeout(timer);
-  }, [active, busy, graceMs]);
+  }, [active, busy, graceMs, progressKey]);
 
   return active && visible;
 }

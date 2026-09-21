@@ -1,5 +1,6 @@
 "use client";
 
+import { useId } from "react";
 import type { Player } from "@/game/core/types";
 import { cn } from "@/lib/format";
 
@@ -38,7 +39,7 @@ export function PawnPiece({
   className?: string;
 }) {
   const px = SIZE_PX[size];
-  const gradientId = `pawn-${icon.charCodeAt(0)}-${color.replace("#", "")}`;
+  const gradientId = useId().replace(/:/g, "");
   return (
     <span
       className={cn("relative block shrink-0", dimmed && "opacity-70 saturate-50", className)}

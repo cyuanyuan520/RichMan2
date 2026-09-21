@@ -326,6 +326,26 @@ function PathBoard({
   const coords = useMemo(() => map.tiles.map((tile) => tile.coord ?? { x: 50, y: 50 }), [map]);
   const activeIndex = activePlayerId ? (display[activePlayerId] ?? 0) : 0;
 
+  const tokenObstacles = useMemo(() => {
+    const obstacles: Array<{ x: number; y: number; halfWidth: number; halfHeight: number }> = [];
+    for (const [key, ids] of Object.entries(playersByTile)) {
+      if (ids.length === 0) {
+        continue;
+      }
+      const coord = coords[Number(key)];
+      if (!coord) {
+        continue;
+      }
+      obstacles.push({
+        x: coord.x,
+        y: coord.y + (coord.y < 26 ? 4.9 : -4.9),
+        halfWidth: 1.1 + ids.length,
+        halfHeight: 2.8,
+      });
+    }
+    return obstacles;
+  }, [playersByTile, coords]);
+
   const labels = useMemo(() => {
     const priority: number[] = [];
     const push = (index: number | undefined) => {
@@ -343,8 +363,11 @@ function PathBoard({
     for (let index = 0; index < coords.length; index += 1) {
       push(index);
     }
-    return visiblePathLabels(coords, priority);
-  }, [coords, activeIndex, highlightTiles, selectableTiles]);
+    return visiblePathLabels(coords, priority, {
+      flip: (index) => coords[index].y < 26,
+      obstacles: tokenObstacles,
+    });
+  }, [coords, activeIndex, highlightTiles, selectableTiles, tokenObstacles]);
 
   const focus = map.tiles[activeIndex]?.coord ?? { x: 50, y: 50 };
   const zoom = 1.12;
@@ -353,8 +376,12 @@ function PathBoard({
   const route = coords.map((coord) => `${coord.x * 1.5},${coord.y}`).join(" ");
 
   const tooltipCoord = inspect !== null ? coords[inspect] : undefined;
-  const tooltipLeft = tooltipCoord ? clamp(tooltipCoord.x, 13, 87) : 50;
-  const tooltipTop = tooltipCoord ? clamp(tooltipCoord.y, 6, 92) : 50;
+  const tooltipLeft = tooltipCoord
+    ? clamp(50 + (tooltipCoord.x - 50) * zoom + shiftX, 16, 84)
+    : 50;
+  const tooltipTop = tooltipCoord
+    ? clamp(50 + (tooltipCoord.y - 50) * zoom + shiftY, 6, 92)
+    : 50;
   const flipY = tooltipTop < 32;
 
   return (
@@ -503,18 +530,6 @@ function PathBoard({
               top: `${coords[index]?.y ?? 50}%`,
             })}
           />
-          {inspect !== null ? (
-            <div
-              className="pointer-events-none absolute z-30 w-64 rounded-2xl border border-gold-400/25 bg-ink-950/94 p-3 shadow-panel"
-              style={{
-                left: `${tooltipLeft}%`,
-                top: `${tooltipTop}%`,
-                transform: `translate(-50%, ${flipY ? "12px" : "calc(-100% - 12px)"})`,
-              }}
-            >
-              <TileTooltipCard state={state} content={content} index={inspect} ownerOf={ownerOf} />
-            </div>
-          ) : null}
         </motion.div>
         <div
           className="pointer-events-none absolute inset-1.5 z-20 rounded-[1.5rem] border"
@@ -541,6 +556,18 @@ function PathBoard({
           </span>
         ))}
         <div className="pointer-events-none absolute inset-0 z-10 shadow-[inset_0_0_70px_rgba(24,16,8,0.45)]" />
+        {inspect !== null ? (
+          <div
+            className="pointer-events-none absolute z-30 w-64 rounded-2xl border border-gold-400/25 bg-ink-950/94 p-3 shadow-panel"
+            style={{
+              left: `${tooltipLeft}%`,
+              top: `${tooltipTop}%`,
+              transform: `translate(-50%, ${flipY ? "12px" : "calc(-100% - 12px)"})`,
+            }}
+          >
+            <TileTooltipCard state={state} content={content} index={inspect} ownerOf={ownerOf} />
+          </div>
+        ) : null}
       </div>
     </div>
   );

@@ -36,4 +36,33 @@ describe("useDecisionVisible", () => {
     rerender({ active: false });
     await waitFor(() => expect(result.current).toBe(false));
   });
+
+  it("stays hidden while a long animation queue keeps making progress", async () => {
+    const { result, rerender } = renderHook(
+      ({ progress }: { progress: number }) =>
+        useDecisionVisible(true, true, 200, progress, "buy-property"),
+      { initialProps: { progress: 0 } },
+    );
+    for (let step = 1; step <= 12; step += 1) {
+      await sleep(60);
+      rerender({ progress: step });
+      expect(result.current).toBe(false);
+    }
+  });
+
+  it("reveals when a stalled queue stops making progress", async () => {
+    const { result } = renderHook(() => useDecisionVisible(true, true, 60, 5, "buy"));
+    await waitFor(() => expect(result.current).toBe(true));
+  });
+
+  it("hides again when the decision identity changes", async () => {
+    const { result, rerender } = renderHook(
+      ({ identity }: { identity: string }) =>
+        useDecisionVisible(true, false, 40, 0, identity),
+      { initialProps: { identity: "buy-property" } },
+    );
+    await waitFor(() => expect(result.current).toBe(true));
+    rerender({ identity: "raise-funds" });
+    await waitFor(() => expect(result.current).toBe(false));
+  });
 });

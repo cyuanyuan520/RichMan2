@@ -35,4 +35,27 @@ describe("visiblePathLabels", () => {
     const visible = visiblePathLabels(coords, [0, 1, 2, 0]);
     expect([...visible].sort()).toEqual([0, 2]);
   });
+
+  it("places flipped labels above the tile and de-clutters them there", () => {
+    const coords = [coord(20, 10), coord(21, 10.5)];
+    const visible = visiblePathLabels(coords, [0, 1], { flip: () => true });
+    expect(visible.has(0)).toBe(true);
+    expect(visible.has(1)).toBe(false);
+  });
+
+  it("hides a label that would sit under a token row", () => {
+    const coords = [coord(50, 50)];
+    const visible = visiblePathLabels(coords, [0], {
+      obstacles: [{ x: 50, y: 57.5, halfWidth: 3, halfHeight: 2.8 }],
+    });
+    expect(visible.has(0)).toBe(false);
+  });
+
+  it("keeps a label when the token row is on the opposite side", () => {
+    const coords = [coord(50, 50)];
+    const visible = visiblePathLabels(coords, [0], {
+      obstacles: [{ x: 50, y: 42, halfWidth: 3, halfHeight: 2.8 }],
+    });
+    expect(visible.has(0)).toBe(true);
+  });
 });
