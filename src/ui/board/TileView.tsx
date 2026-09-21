@@ -7,6 +7,7 @@ import { rentCellsFor } from "./rent-display";
 
 const kindIcon: Record<string, string> = {
   start: "🚩",
+  property: "🏠",
   chance: "🃏",
   fate: "🎴",
   tax: "🏛️",
@@ -89,56 +90,49 @@ export function TileView({
   if (variant === "path") {
     return (
       <div className="relative flex flex-col items-center">
-        <span
-          className={cn(
-            "mb-0.5 whitespace-nowrap rounded bg-ink-950/85 px-1 text-[9px] leading-tight text-paper-50",
-            !(active || highlighted || selectable) && "hidden",
-          )}
-        >
-          {def.name}
-        </span>
         <button
           type="button"
           onClick={selectable ? onSelect : undefined}
           disabled={!selectable}
           title={def.name}
           className={cn(
-            "relative grid h-9 w-9 place-items-center rounded-full border-2 text-sm shadow-[0_4px_14px_rgba(0,0,0,0.6)] transition-transform",
-            "bg-ink-950/85 backdrop-blur-[1px]",
+            "relative grid h-9 w-9 place-items-center rounded-full border-2 text-[15px] text-ink-900 transition-transform",
+            "bg-[radial-gradient(circle_at_50%_30%,#fffdf4_0%,#f7efdc_55%,#e9dcbc_100%)]",
+            "shadow-[0_2px_6px_rgba(24,16,8,0.5),0_0_0_1.5px_rgba(255,255,255,0.55)]",
             selectable && "cursor-pointer hover:scale-110",
             highlighted && "ring-2 ring-gold-400",
+            active && "scale-110",
             dimmed && "opacity-45 saturate-50",
           )}
-          style={{
-            borderColor: ownerColor ?? accent,
-            background: `radial-gradient(circle at 50% 35%, ${accent}40, rgba(9,13,19,0.9) 70%)`,
-          }}
+          style={{ borderColor: ownerColor ?? accent }}
         >
           {active ? (
-            <span className="pointer-events-none absolute -inset-1 animate-ping rounded-full border-2 border-gold-300/60" />
+            <span className="pointer-events-none absolute -inset-1 animate-ping rounded-full border-2 border-gold-300/70" />
           ) : null}
           <span className="leading-none">{icon}</span>
           {tile.level > 0 ? (
-            <span className="absolute -top-1 left-1/2 flex -translate-x-1/2 gap-[2px]">
+            <span className="absolute -top-1.5 left-1/2 flex -translate-x-1/2 gap-[2px]">
               {Array.from({ length: Math.min(tile.level, 4) }).map((_, levelIndex) => (
-                <span key={levelIndex} className="block h-1 w-1 rounded-full bg-gold-300" />
+                <span key={levelIndex} className="block h-1 w-1 rounded-full bg-gold-300 shadow" />
               ))}
             </span>
           ) : null}
           {tile.ownerId ? (
             <span
-              className="absolute -bottom-0.5 left-1/2 h-1.5 w-1.5 -translate-x-1/2 rounded-full"
+              className="absolute -bottom-1 -right-1 grid h-3.5 w-3.5 place-items-center rounded-full text-[8px] font-bold text-ink-950 shadow"
               style={{ background: ownerColor ?? "#e0b64f" }}
               title={ownerName}
-            />
+            >
+              {(ownerName ?? "?").slice(0, 1)}
+            </span>
           ) : null}
           {tile.mortgaged ? (
-            <span className="absolute -right-1 -top-1 rounded bg-ink-950/90 px-0.5 text-[8px] text-rose-200">
+            <span className="absolute -right-1 -top-1 grid h-3.5 w-3.5 place-items-center rounded-full bg-rose-700 text-[8px] font-bold text-paper-50 shadow">
               押
             </span>
           ) : null}
           {tile.effects.some((effect) => effect.kind === "roadblock") ? (
-            <span className="absolute -right-1 -bottom-1 text-[10px]">🚧</span>
+            <span className="absolute -left-1 -bottom-1 text-[10px]">🚧</span>
           ) : null}
         </button>
       </div>

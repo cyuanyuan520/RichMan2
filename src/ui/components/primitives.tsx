@@ -124,7 +124,7 @@ export function Modal({
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        className="pointer-events-auto absolute inset-0 bg-ink-950/70 backdrop-blur-sm"
+        className="pointer-events-auto absolute inset-0 bg-ink-950/40 backdrop-blur-[1px]"
         onClick={dismissable ? onClose : undefined}
       />
       <motion.div

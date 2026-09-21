@@ -36,6 +36,25 @@ export interface DirectorState {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+export function useDecisionVisible(active: boolean, busy: boolean, graceMs = 1600): boolean {
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    if (!active) {
+      const timer = setTimeout(() => setVisible(false), 0);
+      return () => clearTimeout(timer);
+    }
+    if (!busy) {
+      const timer = setTimeout(() => setVisible(true), 0);
+      return () => clearTimeout(timer);
+    }
+    const timer = setTimeout(() => setVisible(true), graceMs);
+    return () => clearTimeout(timer);
+  }, [active, busy, graceMs]);
+
+  return active && visible;
+}
+
 function playerName(id: PlayerId): string {
   const player = useGameStore.getState().game?.players.find((entry) => entry.id === id);
   return player?.name ?? "玩家";

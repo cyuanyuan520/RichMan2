@@ -26,7 +26,7 @@ import {
   Toast,
 } from "@/ui/dialogs";
 import { Button, SectionTitle } from "@/ui/components/primitives";
-import { useDirector } from "@/ui/fx/use-director";
+import { useDecisionVisible, useDirector } from "@/ui/fx/use-director";
 import { cn } from "@/lib/format";
 import { playSfx } from "@/audio/sfx";
 import { playBgm, stopBgm } from "@/audio/bgm";
@@ -72,6 +72,8 @@ export function GameScreen() {
 
   const pending = game?.pending ?? null;
   const pendingForLocal = pending?.playerId === localPlayerId;
+  const decisionVisible = useDecisionVisible(Boolean(pending), director.busy);
+  const gameOverVisible = useDecisionVisible(game?.phase === "finished", director.busy, 1400);
 
   const targetTiles = useMemo(() => {
     if (!game || !content || !pending) {
@@ -373,35 +375,39 @@ export function GameScreen() {
         </aside>
       </div>
 
-      <BuyPropertyDialog
-        state={game}
-        content={content}
-        localPlayerId={localPlayerId}
-        busy={busy}
-        onDispatch={onSelect}
-      />
-      <RaiseFundsDialog
-        state={game}
-        content={content}
-        localPlayerId={localPlayerId}
-        busy={busy}
-        onDispatch={onSelect}
-        actions={actions}
-      />
-      <TargetPickerDialog
-        state={game}
-        content={content}
-        localPlayerId={localPlayerId}
-        busy={busy}
-        onDispatch={onSelect}
-      />
-      <ChooseDiceDialog
-        state={game}
-        content={content}
-        localPlayerId={localPlayerId}
-        busy={busy}
-        onDispatch={onSelect}
-      />
+      {decisionVisible ? (
+        <>
+          <BuyPropertyDialog
+            state={game}
+            content={content}
+            localPlayerId={localPlayerId}
+            busy={busy}
+            onDispatch={onSelect}
+          />
+          <RaiseFundsDialog
+            state={game}
+            content={content}
+            localPlayerId={localPlayerId}
+            busy={busy}
+            onDispatch={onSelect}
+            actions={actions}
+          />
+          <TargetPickerDialog
+            state={game}
+            content={content}
+            localPlayerId={localPlayerId}
+            busy={busy}
+            onDispatch={onSelect}
+          />
+          <ChooseDiceDialog
+            state={game}
+            content={content}
+            localPlayerId={localPlayerId}
+            busy={busy}
+            onDispatch={onSelect}
+          />
+        </>
+      ) : null}
       <ShopDialog
         open={shopOpen}
         onClose={() => setShopOpen(false)}
@@ -440,7 +446,7 @@ export function GameScreen() {
         content={content}
         playerId={detailPlayer}
       />
-      {game.phase === "finished" ? (
+      {gameOverVisible ? (
         <GameOverDialog
           state={game}
           content={content}
