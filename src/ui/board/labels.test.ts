@@ -36,11 +36,13 @@ describe("visiblePathLabels", () => {
     expect([...visible].sort()).toEqual([0, 2]);
   });
 
-  it("places flipped labels above the tile and de-clutters them there", () => {
-    const coords = [coord(20, 10), coord(21, 10.5)];
-    const visible = visiblePathLabels(coords, [0, 1], { flip: () => true });
+  it("places a flipped label above the tile, freeing the space below", () => {
+    const coords = [coord(20, 10), coord(20, 12.5)];
+    const visible = visiblePathLabels(coords, [0, 1], {
+      flip: (index) => index === 0,
+    });
     expect(visible.has(0)).toBe(true);
-    expect(visible.has(1)).toBe(false);
+    expect(visible.has(1)).toBe(true);
   });
 
   it("hides a label that would sit under a token row", () => {

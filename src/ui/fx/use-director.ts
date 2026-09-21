@@ -143,13 +143,14 @@ export function useDirector(): DirectorState {
         }
         case "token-moved": {
           const steps = event.path.length > 0 ? event.path : [event.to];
+          const stepDelay = Math.min(120, Math.round(1800 / Math.max(1, steps.length)));
           for (const step of steps) {
             if (!live()) {
               return;
             }
             playSfx("step");
             setDisplay((current) => ({ ...current, [event.playerId]: step }));
-            await sleep(120);
+            await sleep(stepDelay);
           }
           if (!live()) {
             return;
